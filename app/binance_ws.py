@@ -29,14 +29,13 @@ class BinanceWSClient:
         # Durum & paper
         self.state = MarketState(self.symbols_u)
         self.signal_cooldown = {}  # symbol -> ts(ms)
-        self.paper = PaperBroker(max_positions=settings.MAX_POSITIONS, daily_loss_limit=None)
-
-        self._running = False
         self.paper = PaperBroker(
             max_positions=settings.MAX_POSITIONS,
             daily_loss_limit=None,
             on_close=lambda rec: asyncio.create_task(insert_trade(rec))
-)
+        )
+
+        self._running = False
 
     # ---------------------------------------------------
     # Yardımcılar
@@ -58,73 +57,40 @@ class BinanceWSClient:
             logger.exception("n8n forward error: %s", e)
 
     # ---------------------------------------------------
-    # Sinyal koşulları + otomatik trade
+    # Otomatik trade: 10$ pozisyon, %3 TP/SL
     # ---------------------------------------------------
-    def _check_conditions(self, sym: str) -> str | None:
-        st = self.state.symbols.get(sym)
-        if not st or st.last_price is None:
-            return None
-
-        # Likidite & volatilite
-        spread_bps = st.spread_bps()
-        if spread_bps is None or spread_bps > settings.MAX_SPREAD_BPS:
-            return None
-
-        atr = st.atr_like(settings.ATR_WINDOW_SEC * 1000)
-        if atr is None or atr < settings.ATR_MIN or atr > settings.ATR_MAX:
-            return None
-
-        if st.tick_rate(2000) < settings.MIN_TICKS_PER_SEC:
-            return None
-
-        # Trend/Momentum
-        if st.ema_fast.value is None or st.ema_slow.value is None:
-            return None
-        if st.ema_fast.value <= st.ema_slow.value:
-            return None
-
-        vwap = st.vwap(settings.VWAP_WINDOW_SEC * 1000)
-        if vwap is None or st.last_price <= vwap:
-            return None
-
-        # Order flow
-        bp = st.buy_pressure(2000)
-        if bp is None or bp < settings.BUY_PRESSURE_MIN:
-            return None
-
-        imb = st.imbalance()
-        if imb is None or imb < settings.IMB_THRESHOLD:
-            return None
-
-        return "BUY"
-
     def _maybe_auto_trade(self, sym: str):
-        decision = self._check_conditions(sym)
-        if decision != "BUY":
+        sigs = self.get_signals()
+        sig = sigs.get(sym)
+        if not sig:
             return
 
-        # Cooldown
-        last = self.signal_cooldown.get(sym, 0)
-        ts = self.state.symbols[sym].last_ts or 0
-        if ts - last < settings.SIGNAL_COOLDOWN_MS:
+        side = sig.get("side")
+        price = self.state.snapshot()[sym]["last_price"]
+        if price is None:
             return
 
-        # Zaten açık pozisyon var mı?
-        if sym in self.paper.positions:
-            return
+        open_pos = self.paper.positions.get(sym)
 
-        st = self.state.symbols[sym]
-        price = st.last_price
+        # Pozisyon yoksa → yeni aç
+        if not open_pos:
+            qty = round(10.0 / price, 6)  # 10$ değerinde miktar
+            if side == "long":
+                stop = price * 0.97       # -%3 stop
+                tp   = price * 1.03       # +%3 kar al
+            else:
+                stop = price * 1.03
+                tp   = price * 0.97
+            self.paper.open(sym, side, qty, price, stop, tp)
+            logger.info(f"AUTO-OPEN {sym} side={side} qty={qty} entry={price:.2f}")
 
-        # Risk parametreleri
-        tp = price * (1 + settings.AUTO_TP_PCT)
-        sl = price * (1 - settings.AUTO_SL_PCT)
-        try:
-            self.paper.open(sym, "long", qty=0.01, price=price, stop=sl, tp=tp)
-            logger.info("AUTO-OPEN %s long @ %.4f tp=%.4f sl=%.4f", sym, price, tp, sl)
-            self.signal_cooldown[sym] = ts
-        except Exception as e:
-            logger.warning("AUTO-OPEN failed %s: %s", sym, e)
+        else:
+            # Pozisyon varsa TP/SL kontrolü
+            entry = open_pos.entry
+            pnl_pct = (price - entry) / entry * (1 if open_pos.side == "long" else -1)
+            if pnl_pct >= 0.03 or pnl_pct <= -0.03:
+                self.paper.close(sym, price)
+                logger.info(f"AUTO-CLOSE {sym} side={open_pos.side} exit={price:.2f} pnl_pct={pnl_pct*100:.2f}%")
 
     # ---------------------------------------------------
     # Handlers
@@ -141,25 +107,22 @@ class BinanceWSClient:
             price = float(data["p"])
             qty = float(data["q"])
             ts = int(data["T"])
-            # m (buyer is maker) -> aggressor SELL; buy_aggr = not m
             buyer_is_maker = bool(data.get("m")) if "m" in data else None
         except Exception:
             return
 
-        # >>> 5 parametreyle çağır (buyer_is_maker dahil) <<<
         ema_f, ema_s = self.state.on_agg_trade(sym, price, qty, ts, buyer_is_maker)
         if ema_f is None or ema_s is None:
             return
 
-        # PnL güncelle & otomatik kapanış (stop/tp)
         self.paper.mark_to_market(sym, price)
 
         logger.info("TICK %s p=%s ema5=%.4f ema20=%.4f", sym, data["p"], ema_f, ema_s)
 
-        # Otomatik açma
+        # Otomatik trade kontrolü
         self._maybe_auto_trade(sym)
 
-        # İsteğe bağlı: webhook'a forward
+        # Webhook'a forward (opsiyonel)
         await self._forward_n8n(data)
 
     async def _handle_depth(self, data: dict):
@@ -208,9 +171,7 @@ class BinanceWSClient:
         while self._running:
             try:
                 tasks = []
-                # Trade akışı
                 tasks.append(asyncio.create_task(self._ws_loop(self.trade_stream, self._handle_agg_trade)))
-                # Depth/bookTicker akışı (opsiyonel)
                 if self.enable_depth:
                     tasks.append(asyncio.create_task(self._ws_loop(self.depth_stream, self._handle_depth)))
                 await asyncio.gather(*tasks)
@@ -225,11 +186,9 @@ class BinanceWSClient:
     async def stop(self):
         self._running = False
 
-
     # ---------------------------------------------------
-    # Yeni eklenen sinyal getter (tam bu hizaya dikkat!)
+    # Sinyal getter
     # ---------------------------------------------------
-       # ---------------------------------------------------------
     def get_signals(self) -> dict:
         """
         Basit scalping sinyalleri: EMA cross + RSI + VWAP + ATR + spread + tickrate + orderflow
