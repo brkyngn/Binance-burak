@@ -1,157 +1,195 @@
-import time
-from collections import deque
-from math import fabs
+import asyncio
+import json
+import aiohttp
+import websockets
+from websockets import ConnectionClosedError, WebSocketException
 
-def now_ms() -> int:
-    return int(time.time() * 1000)
+from .config import settings
+from .logger import logger
+from .state import MarketState
+from .paper import PaperBroker
 
-class EmaCalc:
-    def __init__(self, period: int):
-        self.period = period
-        self.value = None
-        self.k = 2 / (period + 1)
 
-    def update(self, price: float):
-        if self.value is None:
-            self.value = price
-        else:
-            self.value = price * self.k + self.value * (1 - self.k)
-        return self.value
+class BinanceWSClient:
+    def __init__(self):
+        self.ws_url = settings.WS_URL
+        self.stream = settings.STREAM
+        self.symbols_l = [s.lower() for s in settings.SYMBOLS]
+        self.symbols_u = [s.upper() for s in settings.SYMBOLS]
+        self.n8n_url = settings.N8N_WEBHOOK_URL
+        self.enable_depth = settings.ENABLE_DEPTH
+        self.depth_stream = settings.DEPTH_STREAM
 
-class SymbolState:
-    def __init__(self, symbol: str, ema_fast: int = 5, ema_slow: int = 20,
-                 trade_maxlen: int = 3000, depth_maxlen: int = 200):
-        self.symbol = symbol
-        # trade history: (ts, price, qty, is_buy_aggr)
-        self.trades = deque(maxlen=trade_maxlen)
-        self.last_price = None
-        self.last_qty = None
-        self.last_ts = None
+        self.state = MarketState(self.symbols_u)
+        self.signal_cooldown = {}  # symbol -> ts(ms)
+        self.paper = PaperBroker(max_positions=settings.MAX_POSITIONS, daily_loss_limit=None)
 
-        # EMA
-        self.ema_fast = EmaCalc(ema_fast)
-        self.ema_slow = EmaCalc(ema_slow)
+        self._running = False
 
-        # Depth: (best_bid, best_ask, bid_vol, ask_vol)
-        self.best_bid = None
-        self.best_ask = None
-        self.bid_vol = 0.0
-        self.ask_vol = 0.0
-        self.depth_events = deque(maxlen=depth_maxlen)  # (ts, best_bid, best_ask, bid_vol, ask_vol)
+    def _build_streams(self, per_symbol_stream: str) -> str:
+        return "/".join(f"{s}@{per_symbol_stream}" for s in self.symbols_l)
 
-    # ------ Trades ------
-    def on_trade(self, price: float, qty: float, ts: int, is_buy_aggr: bool | None):
-        self.last_price = price
-        self.last_qty = qty
-        self.last_ts = ts
-        self.trades.append((ts, price, qty, is_buy_aggr))
-        f = self.ema_fast.update(price)
-        s = self.ema_slow.update(price)
-        return f, s
+    async def _forward_n8n(self, payload: dict):
+        if not self.n8n_url:
+            return
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as sess:
+                async with sess.post(self.n8n_url, json=payload) as resp:
+                    if resp.status >= 300:
+                        txt = await resp.text()
+                        logger.warning("n8n forward non-200: %s %s", resp.status, txt[:200])
+        except Exception as e:
+            logger.exception("n8n forward error: %s", e)
 
-    # ------ Depth ------
-    def on_depth_top(self, best_bid: float, best_ask: float, bid_vol: float, ask_vol: float, ts: int):
-        self.best_bid = best_bid
-        self.best_ask = best_ask
-        self.bid_vol = bid_vol
-        self.ask_vol = ask_vol
-        self.depth_events.append((ts, best_bid, best_ask, bid_vol, ask_vol))
-
-    # ------ Metrics ------
-    def spread_bps(self) -> float | None:
-        if not self.best_bid or not self.best_ask or self.best_bid <= 0:
+    # ---------- Signal engine ----------
+    def _check_conditions(self, sym: str) -> str | None:
+        st = self.state.symbols.get(sym)
+        if not st or st.last_price is None:
             return None
-        spread = (self.best_ask - self.best_bid) / ((self.best_ask + self.best_bid) / 2.0)
-        return spread * 10000.0  # bps
 
-    def imbalance(self) -> float | None:
-        if self.bid_vol <= 0 or self.ask_vol <= 0:
+        # Likidite & volatilite
+        spread_bps = st.spread_bps()
+        if spread_bps is None or spread_bps > settings.MAX_SPREAD_BPS:
             return None
-        return self.bid_vol / self.ask_vol
 
-    def vwap(self, window_ms: int) -> float | None:
-        cutoff = (self.last_ts or now_ms()) - window_ms
-        num = 0.0
-        den = 0.0
-        for ts, p, q, _ in reversed(self.trades):
-            if ts < cutoff:
-                break
-            num += p * q
-            den += q
-        if den <= 0:
+        atr = st.atr_like(settings.ATR_WINDOW_SEC * 1000)
+        if atr is None or atr < settings.ATR_MIN or atr > settings.ATR_MAX:
             return None
-        return num / den
 
-    def atr_like(self, window_ms: int) -> float | None:
-        """
-        Candles olmadan basit ATR tahmini:
-        - pencere içindeki fiyatların min/max’ı ve bir önceki son fiyattan TR ~ max(|H-L|, |H-prev|, |L-prev|)
-        - normalize: TR / last_price
-        """
-        cutoff = (self.last_ts or now_ms()) - window_ms
-        px = [p for ts, p, _, _ in self.trades if ts >= cutoff]
-        if len(px) < 5:
+        if st.tick_rate(2000) < settings.MIN_TICKS_PER_SEC:
             return None
-        H = max(px)
-        L = min(px)
-        prev = px[0]
-        tr = max(H - L, fabs(H - prev), fabs(L - prev))
-        if self.last_price and self.last_price > 0:
-            return tr / self.last_price
-        return None
 
-    def tick_rate(self, lookback_ms: int = 2000) -> float:
-        cutoff = (self.last_ts or now_ms()) - lookback_ms
-        n = sum(1 for ts, *_ in self.trades if ts >= cutoff)
-        return n / (lookback_ms / 1000.0)
-
-    def buy_pressure(self, lookback_ms: int = 2000) -> float | None:
-        cutoff = (self.last_ts or now_ms()) - lookback_ms
-        buy = 0
-        total = 0
-        for ts, _, _, is_buy in self.trades:
-            if ts < cutoff or is_buy is None:
-                continue
-            total += 1
-            if is_buy:
-                buy += 1
-        if total == 0:
+        # Trend/Momentum
+        if st.ema_fast.value is None or st.ema_slow.value is None:
             return None
-        return buy / total
+        if st.ema_fast.value <= st.ema_slow.value:
+            return None
 
-class MarketState:
-    def __init__(self, symbols: list[str], ema_fast: int = 5, ema_slow: int = 20):
-        self.symbols = {s: SymbolState(s, ema_fast, ema_slow) for s in symbols}
+        vwap = st.vwap(settings.VWAP_WINDOW_SEC * 1000)
+        if vwap is None or st.last_price <= vwap:
+            return None
 
-    def ensure(self, symbol: str):
-        if symbol not in self.symbols:
-            self.symbols[symbol] = SymbolState(symbol)
+        # ROC ~ son 3 sn fiyat farkı
+        # basit yaklaşım: history'den en eski ve en yeni p (3 sn içi)
+        # (state'de hızlı olması için approx atlıyoruz; EMA> ve VWAP> zaten momentum veriyor)
 
-    # aggTrade
-    def on_agg_trade(self, symbol: str, price: float, qty: float, ts: int, buyer_is_maker: bool | None):
-        # Binance 'm' => buyer is maker; aggressor = SELL, dolayısıyla buy_aggr = not m
-        is_buy_aggr = None if buyer_is_maker is None else (not buyer_is_maker)
-        self.ensure(symbol)
-        return self.symbols[symbol].on_trade(price, qty, ts, is_buy_aggr)
+        # Order flow
+        bp = st.buy_pressure(2000)
+        if bp is None or bp < settings.BUY_PRESSURE_MIN:
+            return None
 
-    # depth top
-    def on_top(self, symbol: str, best_bid: float, best_ask: float, bid_vol: float, ask_vol: float, ts: int):
-        self.ensure(symbol)
-        self.symbols[symbol].on_depth_top(best_bid, best_ask, bid_vol, ask_vol, ts)
+        imb = st.imbalance()
+        if imb is None or imb < settings.IMB_THRESHOLD:
+            return None
 
-    def snapshot(self):
-        out = {}
-        for s, st in self.symbols.items():
-            out[s] = {
-                "last_price": st.last_price,
-                "ema_fast": st.ema_fast.value,
-                "ema_slow": st.ema_slow.value,
-                "vwap60": st.vwap(60000),
-                "atr60": st.atr_like(60000),
-                "tick_rate_2s": st.tick_rate(2000),
-                "buy_pressure_2s": st.buy_pressure(2000),
-                "spread_bps": st.spread_bps(),
-                "imbalance": st.imbalance(),
-                "last_ts": st.last_ts,
-            }
-        return out
+        return "BUY"
+
+    def _maybe_auto_trade(self, sym: str):
+        decision = self._check_conditions(sym)
+        if decision != "BUY":
+            return
+
+        # cooldown
+        last = self.signal_cooldown.get(sym, 0)
+        ts = self.state.symbols[sym].last_ts or 0
+        if ts - last < settings.SIGNAL_COOLDOWN_MS:
+            return
+
+        st = self.state.symbols[sym]
+        price = st.last_price
+        if sym in self.paper.positions:
+            return  # pozisyon zaten açık
+
+        # Auto risk
+        tp = price * (1 + settings.AUTO_TP_PCT)
+        sl = price * (1 - settings.AUTO_SL_PCT)
+        try:
+            self.paper.open(sym, "long", qty=0.01, price=price, stop=sl, tp=tp)
+            logger.info("AUTO-OPEN %s long @ %.4f tp=%.4f sl=%.4f", sym, price, tp, sl)
+            self.signal_cooldown[sym] = ts
+        except Exception as e:
+            logger.warning("AUTO-OPEN failed %s: %s", sym, e)
+
+    # ---------- Handlers ----------
+    async def _handle_agg_trade(self, data: dict):
+        # { e, E, s, p, q, T, m, ... }
+        sym = data.get("s")
+        if not sym or "p" not in data or "q" not in data or "T" not in data:
+            return
+        try:
+            price = float(data["p"])
+            qty = float(data["q"])
+            ts = int(data["T"])
+            buyer_is_maker = bool(data.get("m")) if "m" in data else None
+        except Exception:
+            return
+
+        ema_f, ema_s = self.state.on_agg_trade(sym, price, qty, ts, buyer_is_maker)
+        if ema_f is None or ema_s is None:
+            return
+
+        # mark-to-market + otomatik kapanış
+        self.paper.mark_to_market(sym, price)
+
+        # bilgi amaçlı tick log (kısaltılmış)
+        logger.info("TICK %s p=%s ema5=%.4f ema20=%.4f", sym, data["p"], ema_f, ema_s)
+
+        # Koşullar uygunsa otomatik aç
+        self._maybe_auto_trade(sym)
+
+    async def _handle_depth(self, data: dict):
+        # Binance depthUpdate farklı endpoint’te gelir, fakat combined stream'de "depth" kısa paketler var.
+        # Burada sade bir top-of-book hesaplayalım (bids[0], asks[0], ve top hacimler).
+        # Örnek combined 'depth@100ms': {"stream":"btcusdt@depth@100ms","data":{"bids":[["61700.0","1.2"],...],"asks":[...],"E":...,"s":"BTCUSDT"}}
+        d = data.get("data") if "data" in data else data
+        sym = d.get("s")
+        bids = d.get("bids") or []
+        asks = d.get("asks") or []
+        if not sym or not bids or not asks:
+            return
+        try:
+            best_bid = float(bids[0][0]); best_ask = float(asks[0][0])
+            bid_vol = sum(float(b[1]) for b in bids[:5])
+            ask_vol = sum(float(a[1]) for a in asks[:5])
+            ts = int(d.get("E") or 0)
+        except Exception:
+            return
+        self.state.on_top(sym, best_bid, best_ask, bid_vol, ask_vol, ts)
+
+    # ---------- WebSocket loops ----------
+    async def _ws_loop(self, per_symbol_stream: str, handler):
+        params = self._build_streams(per_symbol_stream)
+        url = f"{self.ws_url}?streams={params}"
+        logger.info("Connecting WS: %s", url)
+        async with websockets.connect(url, ping_interval=20, ping_timeout=20, max_queue=2048) as ws:
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                data = msg.get("data") if isinstance(msg, dict) else msg
+                if not isinstance(data, dict):
+                    continue
+                await handler(data)
+
+    async def run(self):
+        self._running = True
+        while self._running:
+            try:
+                tasks = []
+                # trades
+                tasks.append(asyncio.create_task(self._ws_loop(self.stream, self._handle_agg_trade)))
+                # depth (opsiyonel)
+                if self.enable_depth:
+                    tasks.append(asyncio.create_task(self._ws_loop(self.depth_stream, self._handle_depth)))
+                await asyncio.gather(*tasks)
+            except (ConnectionClosedError, WebSocketException, OSError) as e:
+                backoff = settings.BACKOFF_BASE
+                logger.warning("WS disconnected (%s). Reconnecting in %.1fs", e.__class__.__name__, backoff)
+                await asyncio.sleep(backoff)
+            except Exception as e:
+                logger.exception("WS fatal error: %s", e)
+                await asyncio.sleep(2)
+
+    async def stop(self):
+        self._running = False
