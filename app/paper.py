@@ -1,9 +1,11 @@
 import time
+from typing import Callable, Optional
 
 class PaperPosition:
-    def __init__(self, symbol: str, side: str, qty: float, entry: float, stop: float | None = None, tp: float | None = None):
+    def __init__(self, symbol: str, side: str, qty: float, entry: float,
+                 stop: float | None = None, tp: float | None = None):
         self.symbol = symbol
-        self.side = side  # "long" | "short"
+        self.side = side
         self.qty = qty
         self.entry = entry
         self.stop = stop
@@ -46,15 +48,17 @@ class PaperPosition:
         self.exit_price = exit_price
         self.close_ts = int(time.time() * 1000)
 
-
 class PaperBroker:
-    def __init__(self, max_positions: int = 5, daily_loss_limit: float | None = None):
+    def __init__(self, max_positions: int = 5, daily_loss_limit: float | None = None,
+                 on_close: Optional[Callable[[dict], None]] = None):
         self.positions: dict[str, PaperPosition] = {}
         self.history: list[dict] = []
         self.max_positions = max_positions
         self.daily_loss_limit = daily_loss_limit
+        self.on_close = on_close
 
-    def open(self, symbol: str, side: str, qty: float, price: float, stop: float | None = None, tp: float | None = None):
+    def open(self, symbol: str, side: str, qty: float, price: float,
+             stop: float | None = None, tp: float | None = None):
         if len(self.positions) >= self.max_positions:
             raise ValueError("Max open positions reached")
         if symbol in self.positions and not self.positions[symbol].closed:
@@ -68,7 +72,7 @@ class PaperBroker:
         if not pos or pos.closed:
             raise ValueError("No open position for symbol")
         pos.close(price)
-        self.history.append({
+        rec = {
             "symbol": pos.symbol,
             "side": pos.side,
             "qty": pos.qty,
@@ -77,8 +81,15 @@ class PaperBroker:
             "pnl": pos.pnl,
             "open_ts": pos.open_ts,
             "close_ts": pos.close_ts,
-        })
+        }
+        self.history.append(rec)
         del self.positions[symbol]
+
+        if self.on_close:
+            try:
+                self.on_close(rec)
+            except Exception:
+                pass
         return pos
 
     def mark_to_market(self, symbol: str, price: float):
@@ -94,8 +105,13 @@ class PaperBroker:
         open_pos = {}
         for s, p in self.positions.items():
             open_pos[s] = {
-                "side": p.side, "qty": p.qty, "entry": p.entry,
-                "stop": p.stop, "tp": p.tp, "pnl": p.pnl, "open_ts": p.open_ts
+                "side": p.side,
+                "qty": p.qty,
+                "entry": p.entry,
+                "stop": p.stop,
+                "tp": p.tp,
+                "pnl": p.pnl,
+                "open_ts": p.open_ts
             }
         return {
             "open": open_pos,
