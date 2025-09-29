@@ -216,5 +216,35 @@ class BinanceWSClient:
                 logger.exception("WS fatal error: %s", e)
                 await asyncio.sleep(2)
 
+     def get_signals(self) -> dict:
+        """
+        Her sembol için anlık sinyal (BUY/NONE) ve önemli metrikler.
+        """
+        out = {}
+        for sym in self.symbols_u:
+            st = self.state.symbols.get(sym)
+            if not st or st.last_price is None:
+                out[sym] = {"decision": None, "reason": "no_data"}
+                continue
+
+            decision = "BUY" if self._check_conditions(sym) == "BUY" else "NONE"
+
+            out[sym] = {
+                "decision": decision,
+                "last_price": st.last_price,
+                "ema_fast": st.ema_fast.value,
+                "ema_slow": st.ema_slow.value,
+                "vwap_sec": settings.VWAP_WINDOW_SEC,
+                "vwap": st.vwap(settings.VWAP_WINDOW_SEC * 1000),
+                "atr_sec": settings.ATR_WINDOW_SEC,
+                "atr": st.atr_like(settings.ATR_WINDOW_SEC * 1000),
+                "tick_rate_2s": st.tick_rate(2000),
+                "buy_pressure_2s": st.buy_pressure(2000),
+                "spread_bps": st.spread_bps(),
+                "imbalance": st.imbalance(),
+                "cooldown_ms": settings.SIGNAL_COOLDOWN_MS,
+            }
+        return out
+
     async def stop(self):
         self._running = False
