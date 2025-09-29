@@ -52,10 +52,7 @@ class BinanceWSClient:
             logger.exception("n8n forward error: %s", e)
 
     async def _handle_agg_trade(self, data: dict):
-        """
-        aggTrade örnek:
-        {\"e\":\"aggTrade\",\"E\":...,\"s\":\"BTCUSDT\",\"p\":\"61750.12\",\"q\":\"0.001\",\"T\":...}
-        """
+        # { e, E, s, p, q, T, m, ... }
         sym = data.get("s")
         if not sym or "p" not in data or "q" not in data or "T" not in data:
             return
@@ -63,29 +60,26 @@ class BinanceWSClient:
             price = float(data["p"])
             qty = float(data["q"])
             ts = int(data["T"])
-        except (ValueError, TypeError):
+            # Binance aggTrade'de 'm' (buyer is maker) bulunur:
+            # m = True  -> buyer is maker (aggressor SELL)  -> buy_aggr = False
+            # m = False -> buyer is taker (aggressor BUY)   -> buy_aggr = True
+            buyer_is_maker = bool(data.get("m")) if "m" in data else None
+        except Exception:
             return
 
-        # EMA güncelle
-        ema_f, ema_s = self.state.on_agg_trade(sym, price, qty, ts)
+        # >>> Burada 5. argüman olarak buyer_is_maker'ı geçiriyoruz <<<
+        ema_f, ema_s = self.state.on_agg_trade(sym, price, qty, ts, buyer_is_maker)
         if ema_f is None or ema_s is None:
             return
 
-        logger.info("TICK %s p=%s q=%s ema5=%.4f ema20=%.4f",
-                    sym, data["p"], data["q"], ema_f, ema_s)
-
-        # Basit sinyal
-        last = self.signal_cooldown.get(sym, 0)
-        if ts - last > 2000:    # 2 sn cooldown
-            if ema_f > ema_s:
-                logger.info("SIGNAL %s BUY (ema5>ema20)", sym)
-                self.signal_cooldown[sym] = ts
-            elif ema_f < ema_s:
-                logger.info("SIGNAL %s EXIT/SELL (ema5<ema20)", sym)
-                self.signal_cooldown[sym] = ts
-
-        # Paper pozisyonu mark-to-market
+        # mark-to-market + otomatik kapanış
         self.paper.mark_to_market(sym, price)
+
+        # bilgi amaçlı tick log (kısaltılmış)
+        logger.info("TICK %s p=%s ema5=%.4f ema20=%.4f", sym, data["p"], ema_f, ema_s)
+
+        # Koşullar uygunsa otomatik aç
+        self._maybe_auto_trade(sym)
 
     async def _consume(self):
         """WS’e bağlanır ve mesajları işler"""
