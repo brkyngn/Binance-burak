@@ -1,15 +1,28 @@
 import asyncio
-from fastapi import FastAPI, Body
-from fastapi.responses import JSONResponse
+import os
+from fastapi import FastAPI, Body, Request
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from .binance_ws import BinanceWSClient
 from .config import settings
 from .logger import logger
 from .db import init_pool, fetch_recent
 
+# -----------------------------
+# FastAPI app & templates
+# -----------------------------
 app = FastAPI(title="Binance WS Relay")
+templates = Jinja2Templates(directory="app/templates")
+
+# -----------------------------
+# Binance WS Client
+# -----------------------------
 client = BinanceWSClient()
 
+# -----------------------------
+# Startup & Shutdown
+# -----------------------------
 @app.on_event("startup")
 async def _startup():
     logger.info("Starting Binance WS consumer… symbols=%s stream=%s",
@@ -26,6 +39,9 @@ async def _shutdown():
     if task:
         task.cancel()
 
+# -----------------------------
+# API Endpoints
+# -----------------------------
 @app.get("/healthz")
 async def healthz():
     return JSONResponse({"ok": True, "symbols": settings.SYMBOLS, "stream": settings.STREAM})
@@ -41,12 +57,8 @@ async def signals():
 @app.get("/paper/positions")
 async def paper_positions():
     return JSONResponse(client.paper.snapshot())
-    
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-import os
 
-# ------ MANUEL ORDER / CLOSE (geri eklendi) ------
+# ------ MANUEL ORDER / CLOSE ------
 @app.post("/paper/order")
 async def paper_order(
     symbol: str = Body(..., embed=True),
@@ -76,7 +88,6 @@ async def paper_close(symbol: str = Body(..., embed=True)):
         return JSONResponse({"ok": True, "closed": {"symbol": pos.symbol, "pnl": pos.pnl, "exit": pos.exit_price}})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-# --------------------------------------------------
 
 @app.get("/history")
 async def history(limit: int = 50):
@@ -84,3 +95,10 @@ async def history(limit: int = 50):
         return JSONResponse({"ok": False, "error": "DATABASE_URL not set"}, status_code=400)
     rows = await fetch_recent(limit=limit)
     return JSONResponse({"ok": True, "rows": rows})
+
+# -----------------------------
+# Dashboard Page
+# -----------------------------
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request})
