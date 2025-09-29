@@ -50,16 +50,42 @@ async function refresh(){
     document.getElementById('stats').textContent   = JSON.stringify(await fetchJson('/stats'), null, 2);
 
     // Positions
-    const pos = await fetchJson('/paper/positions');
-    const ptab = document.getElementById('positions');
-    ptab.innerHTML = "<tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>TP</th><th>SL</th><th>PnL</th></tr>";
-    for (const [s,v] of Object.entries(pos.open||{})){
-      ptab.innerHTML += `<tr>
-        <td>${s}</td><td>${v.side}</td><td>${v.qty}</td>
-        <td>${v.entry.toFixed(2)}</td><td>${v.tp.toFixed(2)}</td>
-        <td>${v.stop.toFixed(2)}</td><td>${v.pnl.toFixed(4)}</td>
-      </tr>`;
-    }
+const pos = await fetchJson('/paper/positions');
+const ptab = document.getElementById('positions');
+ptab.innerHTML = `
+<tr>
+  <th>Symbol</th>
+  <th>Side</th>
+  <th>Qty</th>
+  <th>Entry</th>
+  <th>Entry ($)</th>
+  <th>TP</th>
+  <th>TP ($)</th>
+  <th>SL</th>
+  <th>SL ($)</th>
+  <th>PnL</th>
+  <th>PnL ($)</th>
+</tr>`;
+for (const [s,v] of Object.entries(pos.open||{})){
+  const entryUSD = (v.entry * v.qty).toFixed(2);
+  const tpUSD    = (v.tp * v.qty).toFixed(2);
+  const slUSD    = (v.stop * v.qty).toFixed(2);
+  const pnlUSD   = (v.pnl).toFixed(4);   // pnl zaten $ cinsinden
+
+  ptab.innerHTML += `<tr>
+    <td>${s}</td>
+    <td>${v.side}</td>
+    <td>${v.qty}</td>
+    <td>${v.entry.toFixed(2)}</td>
+    <td>${entryUSD}</td>
+    <td>${v.tp.toFixed(2)}</td>
+    <td>${tpUSD}</td>
+    <td>${v.stop.toFixed(2)}</td>
+    <td>${slUSD}</td>
+    <td>${v.pnl.toFixed(4)}</td>
+    <td>${pnlUSD}</td>
+  </tr>`;
+}
 
     // History
     const hist = await fetchJson('/history?limit=20');
