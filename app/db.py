@@ -56,4 +56,11 @@ async def fetch_recent(limit: int = 50) -> list[dict]:
              FROM trades ORDER BY id DESC LIMIT $1"""
     async with _pool.acquire() as conn:
         rows = await conn.fetch(sql, limit)
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        rec = dict(r)
+        # datetime -> ISO8601 string
+        if isinstance(rec.get("created_at"), datetime):
+            rec["created_at"] = rec["created_at"].isoformat()
+        out.append(rec)
+    return out
