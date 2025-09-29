@@ -18,6 +18,7 @@ class EmaCalc:
             self.value = price * self.k + self.value * (1 - self.k)
         return self.value
 
+
 class SymbolState:
     def __init__(self, symbol: str, ema_fast: int = 5, ema_slow: int = 20,
                  trade_maxlen: int = 3000, depth_maxlen: int = 200):
@@ -39,14 +40,43 @@ class SymbolState:
         self.ask_vol = 0.0
         self.depth_events = deque(maxlen=depth_maxlen)  # (ts, best_bid, best_ask, bid_vol, ask_vol)
 
+        # --- RSI(14) ---
+        self.rsi_period = 14
+        self.rsi_gain = 0.0
+        self.rsi_loss = 0.0
+        self.rsi_value = None
+        self.prev_price = None
+
     # ------ Trades ------
     def on_trade(self, price: float, qty: float, ts: int, is_buy_aggr: bool | None):
         self.last_price = price
         self.last_qty = qty
         self.last_ts = ts
         self.trades.append((ts, price, qty, is_buy_aggr))
+
+        # EMA
         f = self.ema_fast.update(price)
         s = self.ema_slow.update(price)
+
+        # RSI(14)
+        if self.prev_price is not None:
+            change = price - self.prev_price
+            gain = max(change, 0.0)
+            loss = max(-change, 0.0)
+            if self.rsi_gain == 0 and self.rsi_loss == 0:
+                self.rsi_gain = gain
+                self.rsi_loss = loss
+            else:
+                self.rsi_gain = (self.rsi_gain * (self.rsi_period - 1) + gain) / self.rsi_period
+                self.rsi_loss = (self.rsi_loss * (self.rsi_period - 1) + loss) / self.rsi_period
+
+            if self.rsi_loss == 0:
+                self.rsi_value = 100.0
+            else:
+                rs = self.rsi_gain / self.rsi_loss
+                self.rsi_value = 100 - (100 / (1 + rs))
+        self.prev_price = price
+
         return f, s
 
     # ------ Depth ------
@@ -119,6 +149,7 @@ class SymbolState:
             return None
         return buy / total
 
+
 class MarketState:
     def __init__(self, symbols: list[str], ema_fast: int = 5, ema_slow: int = 20):
         self.symbols = {s: SymbolState(s, ema_fast, ema_slow) for s in symbols}
@@ -148,6 +179,7 @@ class MarketState:
                 "ema_slow": st.ema_slow.value,
                 "vwap60": st.vwap(60000),
                 "atr60": st.atr_like(60000),
+                "rsi14": st.rsi_value,
                 "tick_rate_2s": st.tick_rate(2000),
                 "buy_pressure_2s": st.buy_pressure(2000),
                 "spread_bps": st.spread_bps(),
