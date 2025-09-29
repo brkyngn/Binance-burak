@@ -9,8 +9,11 @@
   section { background: #fff; padding: 15px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 0 5px #ccc; }
   pre { background: #222; color: #0f0; padding: 10px; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }
+  th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
   th { background: #eee; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .neg { color: #b00020; }
+  .pos { color: #0a7f12; }
 </style>
 </head>
 <body>
@@ -28,12 +31,35 @@
 
 <section>
   <h2>Open Positions</h2>
-  <table id="positions"><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>TP</th><th>SL</th><th>PnL</th></tr></table>
+  <table id="positions">
+    <tr>
+      <th>Symbol</th>
+      <th>Side</th>
+      <th class="num">Qty</th>
+      <th class="num">Entry</th>
+      <th class="num">TP</th>
+      <th class="num">SL</th>
+      <th class="num">Entry $</th>
+      <th class="num">TP $</th>
+      <th class="num">SL $</th>
+      <th class="num">PnL $</th>
+      <th>Opened At</th>
+    </tr>
+  </table>
 </section>
 
 <section>
-  <h2>History (Last 20)</h2>
-  <table id="history"><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Closed At</th></tr></table>
+  <h2>History (Last 100)</h2>
+  <table id="history">
+    <tr>
+      <th>Symbol</th><th>Side</th>
+      <th class="num">Qty</th>
+      <th class="num">Entry</th><th class="num">Exit</th>
+      <th class="num">Size $</th>
+      <th class="num">PnL $</th>
+      <th>Opened At</th><th>Closed At</th>
+    </tr>
+  </table>
 </section>
 
 <section>
@@ -42,66 +68,91 @@
 </section>
 
 <script>
+function fmt2(x){ return Number(x).toLocaleString(undefined,{maximumFractionDigits:2}); }
+function fmt4(x){ return Number(x).toLocaleString(undefined,{maximumFractionDigits:4}); }
+function fmt6(x){ return Number(x).toLocaleString(undefined,{maximumFractionDigits:6}); }
+function tsToLocal(ts){ return ts ? new Date(Number(ts)).toLocaleString() : '-'; }
+
 async function fetchJson(url){ const r = await fetch(url); return await r.json(); }
 
 async function refresh(){
   try {
+    // Signals & Stats (raw)
     document.getElementById('signals').textContent = JSON.stringify(await fetchJson('/signals'), null, 2);
     document.getElementById('stats').textContent   = JSON.stringify(await fetchJson('/stats'), null, 2);
 
     // Positions
-const pos = await fetchJson('/paper/positions');
-const ptab = document.getElementById('positions');
-ptab.innerHTML = `
-<tr>
-  <th>Symbol</th>
-  <th>Side</th>
-  <th>Qty</th>
-  <th>Entry</th>
-  <th>Entry ($)</th>
-  <th>TP</th>
-  <th>TP ($)</th>
-  <th>SL</th>
-  <th>SL ($)</th>
-  <th>PnL</th>
-  <th>PnL ($)</th>
-</tr>`;
-for (const [s,v] of Object.entries(pos.open||{})){
-  const entryUSD = (v.entry * v.qty).toFixed(2);
-  const tpUSD    = (v.tp * v.qty).toFixed(2);
-  const slUSD    = (v.stop * v.qty).toFixed(2);
-  const pnlUSD   = (v.pnl).toFixed(4);   // pnl zaten $ cinsinden
+    const pos = await fetchJson('/paper/positions');
+    const ptab = document.getElementById('positions');
+    ptab.innerHTML = `
+    <tr>
+      <th>Symbol</th>
+      <th>Side</th>
+      <th class="num">Qty</th>
+      <th class="num">Entry</th>
+      <th class="num">TP</th>
+      <th class="num">SL</th>
+      <th class="num">Entry $</th>
+      <th class="num">TP $</th>
+      <th class="num">SL $</th>
+      <th class="num">PnL $</th>
+      <th>Opened At</th>
+    </tr>`;
+    for (const [s,v] of Object.entries(pos.open||{})){
+      const entry$ = (v.entry ?? 0) * (v.qty ?? 0);
+      const tp$    = (v.tp ?? 0)    * (v.qty ?? 0);
+      const sl$    = (v.stop ?? 0)  * (v.qty ?? 0);
+      const pnl$   = v.pnl ?? 0;
+      const opened = tsToLocal(v.open_ts);
 
-  ptab.innerHTML += `<tr>
-    <td>${s}</td>
-    <td>${v.side}</td>
-    <td>${v.qty}</td>
-    <td>${v.entry.toFixed(2)}</td>
-    <td>${entryUSD}</td>
-    <td>${v.tp.toFixed(2)}</td>
-    <td>${tpUSD}</td>
-    <td>${v.stop.toFixed(2)}</td>
-    <td>${slUSD}</td>
-    <td>${v.pnl.toFixed(4)}</td>
-    <td>${pnlUSD}</td>
-  </tr>`;
-}
-
-    // History
-    const hist = await fetchJson('/history?limit=20');
-    const htab = document.getElementById('history');
-    htab.innerHTML = "<tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Closed At</th></tr>";
-    for (const row of hist.rows||[]){
-      htab.innerHTML += `<tr>
-        <td>${row.symbol}</td><td>${row.side}</td>
-        <td>${row.entry.toFixed(2)}</td><td>${row.exit.toFixed(2)}</td>
-        <td>${row.pnl.toFixed(4)}</td><td>${row.closed_at}</td>
+      ptab.innerHTML += `<tr>
+        <td>${s}</td>
+        <td>${v.side}</td>
+        <td class="num">${fmt6(v.qty)}</td>
+        <td class="num">${v.entry != null ? fmt2(v.entry) : '-'}</td>
+        <td class="num">${v.tp != null ? fmt2(v.tp) : '-'}</td>
+        <td class="num">${v.stop != null ? fmt2(v.stop) : '-'}</td>
+        <td class="num">${fmt2(entry$)}</td>
+        <td class="num">${v.tp != null ? fmt2(tp$) : '-'}</td>
+        <td class="num">${v.stop != null ? fmt2(sl$) : '-'}</td>
+        <td class="num ${pnl$>=0?'pos':'neg'}">${fmt4(pnl$)}</td>
+        <td>${opened}</td>
       </tr>`;
     }
 
+    // History (last 100)
+    const hist = await fetchJson('/history?limit=100');
+    const htab = document.getElementById('history');
+    htab.innerHTML = `
+    <tr>
+      <th>Symbol</th><th>Side</th>
+      <th class="num">Qty</th>
+      <th class="num">Entry</th><th class="num">Exit</th>
+      <th class="num">Size $</th>
+      <th class="num">PnL $</th>
+      <th>Opened At</th><th>Closed At</th>
+    </tr>`;
+    for (const row of (hist.rows||[])){
+      const size$ = (row.entry ?? 0) * (row.qty ?? 0);
+      htab.innerHTML += `<tr>
+        <td>${row.symbol}</td>
+        <td>${row.side}</td>
+        <td class="num">${fmt6(row.qty)}</td>
+        <td class="num">${row.entry != null ? fmt2(row.entry) : '-'}</td>
+        <td class="num">${row.exit  != null ? fmt2(row.exit)  : '-'}</td>
+        <td class="num">${fmt2(size$)}</td>
+        <td class="num ${row.pnl>=0?'pos':'neg'}">${fmt4(row.pnl)}</td>
+        <td>${tsToLocal(row.open_ts)}</td>
+        <td>${tsToLocal(row.close_ts)}</td>
+      </tr>`;
+    }
+
+    // Health
     document.getElementById('health').textContent = JSON.stringify(await fetchJson('/healthz'), null, 2);
+
   } catch(e){ console.error(e); }
 }
+
 setInterval(refresh, 5000);
 refresh();
 </script>
