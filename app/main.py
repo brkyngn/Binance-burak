@@ -1,6 +1,7 @@
 import asyncio
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+
 from .binance_ws import BinanceWSClient
 from .config import settings
 from .logger import logger
@@ -10,7 +11,11 @@ client = BinanceWSClient()
 
 @app.on_event("startup")
 async def _startup():
-    logger.info("Starting Binance WS consumer… symbols=%s stream=%s", settings.SYMBOLS, settings.STREAM)
+    logger.info(
+        "Starting Binance WS consumer… symbols=%s stream=%s",
+        settings.SYMBOLS, settings.STREAM
+    )
+    # WS tüketicisini arka planda başlat
     app.state.task = asyncio.create_task(client.run())
 
 @app.on_event("shutdown")
@@ -23,4 +28,18 @@ async def _shutdown():
 
 @app.get("/healthz")
 async def healthz():
-    return JSONResponse({"ok": True, "symbols": settings.SYMBOLS, "stream": settings.STREAM})
+    """
+    Sağlık kontrolü: servis ayakta mı, hangi semboller/stream ile çalışıyor?
+    """
+    return JSONResponse({
+        "ok": True,
+        "symbols": settings.SYMBOLS,
+        "stream": settings.STREAM
+    })
+
+@app.get("/stats")
+async def stats():
+    """
+    Son durum: sembol başına son fiyat, EMA5/EMA20 ve kısa özet.
+    """
+    return JSONResponse(client.state.snapshot())
