@@ -30,6 +30,7 @@ class BinanceWSClient:
         self.signal_cooldown = {}  # symbol -> last_signal_ts(ms)
 
         self._running = False
+        self.paper = PaperBroker(max_positions=5, daily_loss_limit=None)
 
     def _build_params(self) -> str:
         """
@@ -90,6 +91,9 @@ class BinanceWSClient:
                 logger.info("SIGNAL %s EXIT/SELL (ema5<ema20)", sym)
                 self.signal_cooldown[sym] = ts
 
+    # ... sinyal loglarından sonra:
+self.paper.mark_to_market(sym, price)
+    
     async def _consume(self):
         """
         WebSocket bağlan ve gelen mesajları işle.
