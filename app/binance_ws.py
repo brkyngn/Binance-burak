@@ -7,7 +7,7 @@ from websockets import ConnectionClosedError, WebSocketException
 from .config import settings
 from .logger import logger
 from .state import MarketState
-
+from .paper import PaperBroker
 
 class BinanceWSClient:
     """
