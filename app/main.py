@@ -80,3 +80,7 @@ async def paper_close(symbol: str = Body(..., embed=True)):
         return JSONResponse({"ok": True, "closed": {"symbol": pos.symbol, "pnl": pos.pnl, "exit": pos.exit_price}})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+@app.get("/signals")
+async def signals():
+    return JSONResponse(client.get_signals())
