@@ -216,9 +216,16 @@ class BinanceWSClient:
                 logger.exception("WS fatal error: %s", e)
                 await asyncio.sleep(2)
 
-     def get_signals(self) -> dict:
+    async def stop(self):
+        self._running = False
+
+
+    # ---------------------------------------------------
+    # Yeni eklenen sinyal getter (tam bu hizaya dikkat!)
+    # ---------------------------------------------------
+    def get_signals(self) -> dict:
         """
-        Her sembol için anlık sinyal (BUY/NONE) ve önemli metrikler.
+        Her sembol için anlık sinyal (BUY/NONE) ve ilgili metrikler
         """
         out = {}
         for sym in self.symbols_u:
@@ -245,6 +252,3 @@ class BinanceWSClient:
                 "cooldown_ms": settings.SIGNAL_COOLDOWN_MS,
             }
         return out
-
-    async def stop(self):
-        self._running = False
