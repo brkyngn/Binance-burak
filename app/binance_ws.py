@@ -229,32 +229,53 @@ class BinanceWSClient:
     # ---------------------------------------------------
     # Yeni eklenen sinyal getter (tam bu hizaya dikkat!)
     # ---------------------------------------------------
+       # ---------------------------------------------------------
     def get_signals(self) -> dict:
         """
-        Her sembol için anlık sinyal (BUY/NONE) ve ilgili metrikler
+        Basit scalping sinyalleri: EMA cross + RSI + VWAP + ATR + spread + tickrate + orderflow
         """
-        out = {}
-        for sym in self.symbols_u:
-            st = self.state.symbols.get(sym)
-            if not st or st.last_price is None:
-                out[sym] = {"decision": None, "reason": "no_data"}
+        sigs = {}
+        snap = self.state.snapshot()
+        for sym, st in snap.items():
+            lp = st.get("last_price")
+            ef = st.get("ema_fast")
+            es = st.get("ema_slow")
+            rsi = st.get("rsi14")
+            vwap = st.get("vwap60")
+            atr = st.get("atr60")
+            spread = st.get("spread_bps")
+            tick = st.get("tick_rate_2s")
+            bp = st.get("buy_pressure_2s")
+
+            if None in (lp, ef, es, rsi, vwap, atr, spread, tick, bp):
                 continue
 
-            decision = "BUY" if self._check_conditions(sym) == "BUY" else "NONE"
+            max_spread = 5
+            min_tick = 1.0
+            min_atr = 0.0002
+            max_vwap_dev = 0.002   # %0.2 sapma
 
-            out[sym] = {
-                "decision": decision,
-                "last_price": st.last_price,
-                "ema_fast": st.ema_fast.value,
-                "ema_slow": st.ema_slow.value,
-                "vwap_sec": settings.VWAP_WINDOW_SEC,
-                "vwap": st.vwap(settings.VWAP_WINDOW_SEC * 1000),
-                "atr_sec": settings.ATR_WINDOW_SEC,
-                "atr": st.atr_like(settings.ATR_WINDOW_SEC * 1000),
-                "tick_rate_2s": st.tick_rate(2000),
-                "buy_pressure_2s": st.buy_pressure(2000),
-                "spread_bps": st.spread_bps(),
-                "imbalance": st.imbalance(),
-                "cooldown_ms": settings.SIGNAL_COOLDOWN_MS,
-            }
-        return out
+            vwap_dev = abs(lp - vwap) / vwap if vwap else 0.0
+
+            if spread > max_spread or tick < min_tick or atr < min_atr or vwap_dev > max_vwap_dev:
+                continue
+
+            side = None
+            if ef > es and rsi < 70 and bp >= 0.55:
+                side = "long"
+            elif ef < es and rsi > 30 and bp <= 0.45:
+                side = "short"
+
+            if side:
+                sigs[sym] = {
+                    "side": side,
+                    "ema_fast": ef,
+                    "ema_slow": es,
+                    "rsi14": rsi,
+                    "vwap_dev": round(vwap_dev*100, 3),
+                    "atr60": atr,
+                    "spread_bps": spread,
+                    "tick_rate": tick,
+                    "buy_pressure": bp,
+                }
+        return sigs
