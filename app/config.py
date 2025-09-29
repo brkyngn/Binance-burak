@@ -54,4 +54,33 @@ class Settings:
     SIGNAL_COOLDOWN_MS: int = _get_int("SIGNAL_COOLDOWN_MS", 2000)
     MAX_POSITIONS: int = _get_int("MAX_POSITIONS", 3)
 
+    import os
+
+class Settings:
+    SYMBOLS = os.getenv("SYMBOLS", "BTCUSDT,ETHUSDT").split(",")
+    STREAM = os.getenv("STREAM", "aggTrade")
+    WS_URL = os.getenv("WS_URL", "wss://stream.binance.com:9443/stream")
+    ENABLE_DEPTH = os.getenv("ENABLE_DEPTH", "false").lower() == "true"
+    DEPTH_STREAM = os.getenv("DEPTH_STREAM", "bookTicker")
+
+    N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
+    MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
+
+    VWAP_WINDOW_SEC = int(os.getenv("VWAP_WINDOW_SEC", "60"))
+    ATR_WINDOW_SEC = int(os.getenv("ATR_WINDOW_SEC", "60"))
+    ATR_MIN = float(os.getenv("ATR_MIN", "0.0"))
+    ATR_MAX = float(os.getenv("ATR_MAX", "1000000.0"))
+    MIN_TICKS_PER_SEC = float(os.getenv("MIN_TICKS_PER_SEC", "0.5"))
+    BUY_PRESSURE_MIN = float(os.getenv("BUY_PRESSURE_MIN", "0.55"))
+    IMB_THRESHOLD = float(os.getenv("IMB_THRESHOLD", "1.2"))
+    MAX_SPREAD_BPS = float(os.getenv("MAX_SPREAD_BPS", "5.0"))
+    SIGNAL_COOLDOWN_MS = int(os.getenv("SIGNAL_COOLDOWN_MS", "2000"))
+
+    AUTO_TP_PCT = float(os.getenv("AUTO_TP_PCT", "0.005"))
+    AUTO_SL_PCT = float(os.getenv("AUTO_SL_PCT", "0.005"))
+
+    BACKOFF_BASE = float(os.getenv("BACKOFF_BASE", "2.0"))
+
+    DATABASE_URL = os.getenv("DATABASE_URL")   # <<< EKLENDİ
+
 settings = Settings()
