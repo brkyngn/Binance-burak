@@ -11,48 +11,123 @@ from .paper import PaperBroker
 
 
 class BinanceWSClient:
-    """
-    Binance çoklu stream WebSocket tüketicisi.
-    SYMBOLS: settings.SYMBOLS (örn: ["BTCUSDT", "ETHUSDT"])
-    STREAM : settings.STREAM  (örn: "aggTrade" | "trade" | "kline_1s" | "depth@100ms")
-    """
-
     def __init__(self):
+        # Konfig
         self.ws_url = settings.WS_URL
-        self.stream = settings.STREAM
-        self.symbols = [s.lower() for s in settings.SYMBOLS]
+        self.trade_stream = settings.STREAM          # ör. "aggTrade"
+        self.depth_stream = settings.DEPTH_STREAM    # ör. "bookTicker"
+        self.enable_depth = settings.ENABLE_DEPTH
+
+        # Semboller
+        self.symbols_l = [s.lower() for s in settings.SYMBOLS]
+        self.symbols_u = [s.upper() for s in settings.SYMBOLS]
+
+        # Opsiyonel webhook
         self.n8n_url = settings.N8N_WEBHOOK_URL
 
-        # EMA + sinyal
-        self.state = MarketState([s.upper() for s in settings.SYMBOLS])
-        self.signal_cooldown = {}         # sembol -> son sinyal zamanı (ms)
-
-        # paper-trading broker
-        self.paper = PaperBroker(max_positions=5, daily_loss_limit=None)
+        # Durum & paper
+        self.state = MarketState(self.symbols_u)
+        self.signal_cooldown = {}  # symbol -> ts(ms)
+        self.paper = PaperBroker(max_positions=settings.MAX_POSITIONS, daily_loss_limit=None)
 
         self._running = False
 
-    def _build_params(self) -> str:
-        """btcusdt@aggTrade/ethusdt@aggTrade formatında stream paramı hazırlar"""
-        streams = [f"{sym}@{self.stream}" for sym in self.symbols]
-        return "/".join(streams)
+    # ---------------------------------------------------
+    # Yardımcılar
+    # ---------------------------------------------------
+    def _build_streams(self, per_symbol_stream: str) -> str:
+        # btcusdt@aggTrade/ethusdt@aggTrade
+        return "/".join(f"{s}@{per_symbol_stream}" for s in self.symbols_l)
 
     async def _forward_n8n(self, payload: dict):
-        """Varsa n8n webhook’una POST eder"""
         if not self.n8n_url:
             return
         try:
-            timeout = aiohttp.ClientTimeout(total=5)
-            async with aiohttp.ClientSession(timeout=timeout) as sess:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as sess:
                 async with sess.post(self.n8n_url, json=payload) as resp:
                     if resp.status >= 300:
-                        text = await resp.text()
-                        logger.warning("n8n forward non-200: %s %s", resp.status, text[:200])
+                        txt = await resp.text()
+                        logger.warning("n8n forward non-200: %s %s", resp.status, txt[:200])
         except Exception as e:
             logger.exception("n8n forward error: %s", e)
 
+    # ---------------------------------------------------
+    # Sinyal koşulları + otomatik trade
+    # ---------------------------------------------------
+    def _check_conditions(self, sym: str) -> str | None:
+        st = self.state.symbols.get(sym)
+        if not st or st.last_price is None:
+            return None
+
+        # Likidite & volatilite
+        spread_bps = st.spread_bps()
+        if spread_bps is None or spread_bps > settings.MAX_SPREAD_BPS:
+            return None
+
+        atr = st.atr_like(settings.ATR_WINDOW_SEC * 1000)
+        if atr is None or atr < settings.ATR_MIN or atr > settings.ATR_MAX:
+            return None
+
+        if st.tick_rate(2000) < settings.MIN_TICKS_PER_SEC:
+            return None
+
+        # Trend/Momentum
+        if st.ema_fast.value is None or st.ema_slow.value is None:
+            return None
+        if st.ema_fast.value <= st.ema_slow.value:
+            return None
+
+        vwap = st.vwap(settings.VWAP_WINDOW_SEC * 1000)
+        if vwap is None or st.last_price <= vwap:
+            return None
+
+        # Order flow
+        bp = st.buy_pressure(2000)
+        if bp is None or bp < settings.BUY_PRESSURE_MIN:
+            return None
+
+        imb = st.imbalance()
+        if imb is None or imb < settings.IMB_THRESHOLD:
+            return None
+
+        return "BUY"
+
+    def _maybe_auto_trade(self, sym: str):
+        decision = self._check_conditions(sym)
+        if decision != "BUY":
+            return
+
+        # Cooldown
+        last = self.signal_cooldown.get(sym, 0)
+        ts = self.state.symbols[sym].last_ts or 0
+        if ts - last < settings.SIGNAL_COOLDOWN_MS:
+            return
+
+        # Zaten açık pozisyon var mı?
+        if sym in self.paper.positions:
+            return
+
+        st = self.state.symbols[sym]
+        price = st.last_price
+
+        # Risk parametreleri
+        tp = price * (1 + settings.AUTO_TP_PCT)
+        sl = price * (1 - settings.AUTO_SL_PCT)
+        try:
+            self.paper.open(sym, "long", qty=0.01, price=price, stop=sl, tp=tp)
+            logger.info("AUTO-OPEN %s long @ %.4f tp=%.4f sl=%.4f", sym, price, tp, sl)
+            self.signal_cooldown[sym] = ts
+        except Exception as e:
+            logger.warning("AUTO-OPEN failed %s: %s", sym, e)
+
+    # ---------------------------------------------------
+    # Handlers
+    # ---------------------------------------------------
     async def _handle_agg_trade(self, data: dict):
-        # { e, E, s, p, q, T, m, ... }
+        """
+        aggTrade payload:
+        {"e":"aggTrade","E":...,"s":"BTCUSDT","p":"61750.12","q":"0.001","T":...,"m":false,...}
+        """
         sym = data.get("s")
         if not sym or "p" not in data or "q" not in data or "T" not in data:
             return
@@ -60,67 +135,82 @@ class BinanceWSClient:
             price = float(data["p"])
             qty = float(data["q"])
             ts = int(data["T"])
-            # Binance aggTrade'de 'm' (buyer is maker) bulunur:
-            # m = True  -> buyer is maker (aggressor SELL)  -> buy_aggr = False
-            # m = False -> buyer is taker (aggressor BUY)   -> buy_aggr = True
+            # m (buyer is maker) -> aggressor SELL; buy_aggr = not m
             buyer_is_maker = bool(data.get("m")) if "m" in data else None
         except Exception:
             return
 
-        # >>> Burada 5. argüman olarak buyer_is_maker'ı geçiriyoruz <<<
+        # >>> 5 parametreyle çağır (buyer_is_maker dahil) <<<
         ema_f, ema_s = self.state.on_agg_trade(sym, price, qty, ts, buyer_is_maker)
         if ema_f is None or ema_s is None:
             return
 
-        # mark-to-market + otomatik kapanış
+        # PnL güncelle & otomatik kapanış (stop/tp)
         self.paper.mark_to_market(sym, price)
 
-        # bilgi amaçlı tick log (kısaltılmış)
         logger.info("TICK %s p=%s ema5=%.4f ema20=%.4f", sym, data["p"], ema_f, ema_s)
 
-        # Koşullar uygunsa otomatik aç
+        # Otomatik açma
         self._maybe_auto_trade(sym)
 
-    async def _consume(self):
-        """WS’e bağlanır ve mesajları işler"""
-        params = self._build_params()
+        # İsteğe bağlı: webhook'a forward
+        await self._forward_n8n(data)
+
+    async def _handle_depth(self, data: dict):
+        """
+        bookTicker payload (combined stream 'symbol@bookTicker'):
+        {"s":"BTCUSDT","b":"61700.00","B":"1.234","a":"61700.10","A":"0.987","E":...}
+        """
+        try:
+            d = data.get("data") if "data" in data else data
+            sym = d.get("s")
+            if not sym:
+                return
+            best_bid = float(d["b"])
+            best_ask = float(d["a"])
+            bid_vol  = float(d.get("B", "0"))
+            ask_vol  = float(d.get("A", "0"))
+            ts       = int(d.get("E") or 0)
+        except Exception:
+            return
+
+        self.state.on_top(sym, best_bid, best_ask, bid_vol, ask_vol, ts)
+
+    # ---------------------------------------------------
+    # WS döngüleri
+    # ---------------------------------------------------
+    async def _ws_loop(self, per_symbol_stream: str, handler):
+        params = self._build_streams(per_symbol_stream)
         url = f"{self.ws_url}?streams={params}"
         logger.info("Connecting WS: %s", url)
-
-        async with websockets.connect(
-            url,
-            ping_interval=20,
-            ping_timeout=20,
-            max_queue=2048
-        ) as ws:
+        async with websockets.connect(url, ping_interval=20, ping_timeout=20, max_queue=2048) as ws:
             async for raw in ws:
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-
                 data = msg.get("data") if isinstance(msg, dict) else msg
                 if not isinstance(data, dict):
                     continue
-
-                if data.get("e") == "aggTrade":
-                    await self._handle_agg_trade(data)
-
-                await self._forward_n8n(data)
+                try:
+                    await handler(data)
+                except Exception as e:
+                    logger.warning("handler error (%s): %s", per_symbol_stream, e)
 
     async def run(self):
-        """Bağlantı koparsa backoff ile tekrar bağlanır"""
         self._running = True
-        attempt = 0
         while self._running:
             try:
-                await self._consume()
-                attempt = 0
+                tasks = []
+                # Trade akışı
+                tasks.append(asyncio.create_task(self._ws_loop(self.trade_stream, self._handle_agg_trade)))
+                # Depth/bookTicker akışı (opsiyonel)
+                if self.enable_depth:
+                    tasks.append(asyncio.create_task(self._ws_loop(self.depth_stream, self._handle_depth)))
+                await asyncio.gather(*tasks)
             except (ConnectionClosedError, WebSocketException, OSError) as e:
-                attempt += 1
-                backoff = min(settings.BACKOFF_BASE * (2 ** (attempt - 1)), settings.BACKOFF_MAX)
-                logger.warning("WS disconnected (%s). Reconnecting in %.1fs",
-                               e.__class__.__name__, backoff)
+                backoff = settings.BACKOFF_BASE
+                logger.warning("WS disconnected (%s). Reconnecting in %.1fs", e.__class__.__name__, backoff)
                 await asyncio.sleep(backoff)
             except Exception as e:
                 logger.exception("WS fatal error: %s", e)
