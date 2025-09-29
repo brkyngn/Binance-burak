@@ -43,3 +43,40 @@ async def stats():
     Son durum: sembol başına son fiyat, EMA5/EMA20 ve kısa özet.
     """
     return JSONResponse(client.state.snapshot())
+
+from fastapi import Body
+
+@app.get("/paper/positions")
+async def paper_positions():
+    return JSONResponse(client.paper.snapshot())
+
+@app.post("/paper/order")
+async def paper_order(
+    symbol: str = Body(..., embed=True),
+    side: str = Body(..., embed=True),  # "long" | "short"
+    qty: float = Body(1.0, embed=True),
+    stop: float | None = Body(None, embed=True),
+    tp: float | None = Body(None, embed=True),
+):
+    # son fiyattan açıyoruz (stats'taki last_price)
+    snap = client.state.snapshot().get(symbol.upper())
+    if not snap or snap["last_price"] is None:
+        return JSONResponse({"ok": False, "error": "No last price yet"}, status_code=400)
+    price = float(snap["last_price"])
+    try:
+        pos = client.paper.open(symbol.upper(), side, qty, price, stop, tp)
+        return JSONResponse({"ok": True, "opened": {"symbol": pos.symbol, "side": pos.side, "entry": pos.entry}})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+@app.post("/paper/close")
+async def paper_close(symbol: str = Body(..., embed=True)):
+    snap = client.state.snapshot().get(symbol.upper())
+    if not snap or snap["last_price"] is None:
+        return JSONResponse({"ok": False, "error": "No last price yet"}, status_code=400)
+    price = float(snap["last_price"])
+    try:
+        pos = client.paper.close(symbol.upper(), price)
+        return JSONResponse({"ok": True, "closed": {"symbol": pos.symbol, "pnl": pos.pnl, "exit": pos.exit_price}})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
