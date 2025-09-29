@@ -8,6 +8,7 @@ from .config import settings
 from .logger import logger
 from .state import MarketState
 from .paper import PaperBroker
+from .db import insert_trade
 
 
 class BinanceWSClient:
@@ -31,6 +32,11 @@ class BinanceWSClient:
         self.paper = PaperBroker(max_positions=settings.MAX_POSITIONS, daily_loss_limit=None)
 
         self._running = False
+        self.paper = PaperBroker(
+            max_positions=settings.MAX_POSITIONS,
+            daily_loss_limit=None,
+            on_close=lambda rec: asyncio.create_task(insert_trade(rec))
+)
 
     # ---------------------------------------------------
     # Yardımcılar
