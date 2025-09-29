@@ -41,6 +41,10 @@ async def signals():
 @app.get("/paper/positions")
 async def paper_positions():
     return JSONResponse(client.paper.snapshot())
+    
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+import os
 
 # ------ MANUEL ORDER / CLOSE (geri eklendi) ------
 @app.post("/paper/order")
