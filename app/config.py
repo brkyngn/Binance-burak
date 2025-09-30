@@ -1,3 +1,4 @@
+from pydantic import BaseSettings
 import os
 
 def _get_float(name: str, default: float) -> float:
@@ -54,6 +55,11 @@ class Settings:
 
     # PostgreSQL
     DATABASE_URL: str | None = os.getenv("DATABASE_URL")
+
+    LEVERAGE: int = int(os.getenv("LEVERAGE", "10"))              # 10x
+    MARGIN_PER_TRADE: float = float(os.getenv("MARGIN_PER_TRADE", "10"))  # 10$ marj
+    MAINT_MARGIN_RATE: float = float(os.getenv("MAINT_MARGIN_RATE", "0.004"))  # 0.4% (yaklaşık)
+    FEE_RATE: float = float(os.getenv("FEE_RATE", "0.0004"))      # 4 bps varsayılan
 
 
 settings = Settings()
