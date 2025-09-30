@@ -50,6 +50,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 .btn{background:#111827;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:8px 10px;font-weight:600;cursor:pointer}
 .btn:hover{filter:brightness(1.1)}
 .input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:120px}
+.code{white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-size:12px;background:#0f1626;border:1px solid var(--line);border-radius:10px;padding:10px;color:#cfe3ff}
 </style>
 </head>
 <body>
@@ -57,8 +58,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
   <div class="header">
     <h1>Scalper Dashboard</h1>
     <div class="badge">
-      <span id="symbolsBadge">SYMBOLS</span> ·
-      <span id="streamBadge">STREAM</span> ·
+      <span id="symbolsBadge">—</span> ·
+      <span id="streamBadge">—</span> ·
       DB: <span id="dbSize">—</span> ·
       <span id="clock"></span>
     </div>
@@ -136,11 +137,30 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
       </table>
     </div>
     <details style="margin-top:10px"><summary>Ham JSON</summary>
-      <pre id="signalsBox" class="mono" style="max-height:280px;overflow:auto;margin-top:8px">—</pre>
+      <pre id="signalsBox" class="mono code" style="max-height:280px;overflow:auto;margin-top:8px">—</pre>
     </details>
   </div>
 
-  <!-- History (Last 100 / DB 10,000) -->
+  <!-- Debug -->
+  <div class="card">
+    <h2>Debug</h2>
+    <div class="hint">Endpoint ham cevapları ve son hatalar</div>
+    <details open style="margin-top:8px">
+      <summary>/health</summary>
+      <pre id="dbgHealth" class="code">—</pre>
+    </details>
+    <details style="margin-top:8px">
+      <summary>/positions</summary>
+      <pre id="dbgPositions" class="code">—</pre>
+    </details>
+    <details style="margin-top:8px">
+      <summary>/signals</summary>
+      <pre id="dbgSignals" class="code">—</pre>
+    </details>
+    <div class="hint" id="dbgError">Son hata: —</div>
+  </div>
+
+  <!-- History -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <h2>History (Last 100 / DB 10,000)</h2>
@@ -175,7 +195,6 @@ const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>el.classList.remove('show'), 2200); }
 function setSymbol(sym){ const el=document.getElementById('symbolInput'); el.value=sym; toast(`Symbol: ${sym}`); }
 
-// Thresholds (Jinja fallbacks)
 const TH = {
   MIN_TICKS_PER_SEC: {{ thresholds.MIN_TICKS_PER_SEC|default(2.0) }},
   MAX_SPREAD_BPS: {{ thresholds.MAX_SPREAD_BPS|default(5) }},
@@ -187,12 +206,10 @@ const TH = {
   ATR_WINDOW_SEC: {{ thresholds.ATR_WINDOW_SEC|default(60) }},
 };
 
-// Clock & health
-function tickClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
-setInterval(tickClock, 1000); tickClock();
-async function loadHealth(){ try{ const r=await fetch('/health',{cache:'no-store'}); const j=await r.json(); document.getElementById('symbolsBadge').textContent=j?.symbols?.join?.(', ')||'—'; document.getElementById('streamBadge').textContent=j?.stream||'—'; }catch{} }
+// ---- Global state for symbol filter from /health
+let currentSymbols = [];
 
-// --------- snake_case ↔ camelCase picker ----------
+// snake_case ↔ camelCase picker
 const pick = (o, ...keys) => {
   for (const k of keys) {
     if (o==null) continue;
@@ -204,6 +221,16 @@ const pick = (o, ...keys) => {
   }
   return undefined;
 };
+
+// Extract first array from an object by preferred keys, else by scanning values
+function extractArray(j, preferredKeys=[]){
+  if (Array.isArray(j)) return j;
+  if (j && typeof j==='object'){
+    for(const k of preferredKeys){ if (Array.isArray(j[k])) return j[k]; }
+    for(const v of Object.values(j)){ if (Array.isArray(v)) return v; }
+  }
+  return [];
+}
 
 // --------- Normalizers ----------
 function normalizePosition(p){
@@ -267,19 +294,42 @@ function decideSide(row){
   return null;
 }
 
+// --------- LOADERS ----------
+async function loadHealth(){
+  try{
+    const r=await fetch('/health',{cache:'no-store'});
+    const j=await r.json();
+    document.getElementById('dbgHealth').textContent = JSON.stringify(j,null,2);
+    const syms = j?.symbols;
+    if (Array.isArray(syms) && syms.length){
+      currentSymbols = syms;
+      document.getElementById('symbolsBadge').textContent = syms.join(', ');
+    }else{
+      currentSymbols = [];
+      document.getElementById('symbolsBadge').textContent = '—';
+    }
+    document.getElementById('streamBadge').textContent = j?.stream || '—';
+  }catch(e){
+    document.getElementById('dbgHealth').textContent = 'Yüklenemedi: '+e.message;
+  }
+}
+
 async function loadSignals(){
   const tb=document.getElementById('signalsTBody');
   try{
-    const r=await fetch('/signals',{cache:'no-store'});
+    const qs = currentSymbols.length ? `?symbols=${encodeURIComponent(currentSymbols.join(','))}` : '';
+    const r=await fetch(`/signals${qs}`,{cache:'no-store'});
     const j=await r.json();
-    const raw = j?.rows ?? j?.data ?? j ?? [];
+    document.getElementById('dbgSignals').textContent = JSON.stringify(j,null,2);
+    const raw = extractArray(j, ['rows','data','signals','ticks','items']);
     const sigs = Array.isArray(raw) ? raw.map(normalizeSignal) : [];
     renderSignalsTable(sigs);
     try{ document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);}catch{}
   }catch(e){
     tb.innerHTML = `<tr><td class="muted" colspan="14">Yüklenemedi.</td></tr>`;
     document.getElementById('signalsBox').textContent = 'Yüklenemedi.';
-    toast(`Signals error: ${e.message}`);
+    document.getElementById('dbgSignals').textContent = 'Hata: '+e.message;
+    setLastError(`Signals error: ${e.message}`);
   }
 }
 
@@ -296,7 +346,7 @@ function renderSignalsTable(sigs){
       tick:(s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC,
       spread:(s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS,
       atr:(s.atr60!=null)&&s.atr60>=TH.ATR_MIN&&s.atr60<=TH.ATR_MAX,
-      vwapDev:(vwapDev==null)?false:(vwapDev<=0.002), // ≤0.20%
+      vwapDev:(vwapDev==null)?false:(vwapDev<=0.002),
       bp:(s.buy_pressure_2s!=null)&&(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN),
       imb:(s.imbalance!=null)&&(s.imbalance>=TH.IMB_THRESHOLD),
       rsiCap:(s.rsi14==null)?true:(s.rsi14<70)
@@ -342,9 +392,11 @@ function renderSignalsTable(sigs){
 async function loadPositions(){
   const body=document.getElementById('posBody');
   try{
-    const r=await fetch('/positions',{cache:'no-store'});
+    const qs = currentSymbols.length ? `?symbols=${encodeURIComponent(currentSymbols.join(','))}` : '';
+    const r=await fetch(`/positions${qs}`,{cache:'no-store'});
     const j=await r.json();
-    const raw = j?.rows ?? j?.data ?? j ?? [];
+    document.getElementById('dbgPositions').textContent = JSON.stringify(j,null,2);
+    const raw = extractArray(j, ['rows','data','positions','openPositions','items']);
     const rows = Array.isArray(raw) ? raw.map(normalizePosition) : [];
     body.innerHTML='';
     if(rows.length===0){
@@ -368,7 +420,7 @@ async function loadPositions(){
     }
   }catch(e){
     body.innerHTML = `<tr><td class="muted" colspan="10">Yüklenemedi.</td></tr>`;
-    toast(`Positions error: ${e.message}`);
+    setLastError(`Positions error: ${e.message}`);
   }
 }
 
@@ -378,7 +430,7 @@ async function loadHistory(limit=100){
   try{
     const r=await fetch(`/history?limit=${limit}`,{cache:'no-store'});
     const j=await r.json();
-    const raw=(j&&j.ok&&Array.isArray(j.rows))?j.rows:(Array.isArray(j)?j:[]);
+    const raw=(j&&j.ok&&Array.isArray(j.rows))?j.rows:(Array.isArray(j)?j:extractArray(j,['rows','data','items']));
     const rows = raw.map(normalizeHistoryRow);
     body.innerHTML='';
     if(rows.length===0){
@@ -404,7 +456,7 @@ async function loadHistory(limit=100){
     }
   }catch(e){
     body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
-    toast(`History error: ${e.message}`);
+    setLastError(`History error: ${e.message}`);
   }
 }
 
@@ -412,10 +464,10 @@ async function loadSummary(){
   try{
     const r=await fetch('/history?limit=10000',{cache:'no-store'});
     const j=await r.json();
-    const rows = j?.rows || [];
-    computeKPIs(rows);
+    const arr = extractArray(j,['rows','data','items']);
+    computeKPIs(arr||[]);
     const dbEl=document.getElementById('dbSize');
-    if(dbEl) dbEl.textContent = String(Math.min(rows.length, 10000));
+    if(dbEl) dbEl.textContent = String(Math.min((arr||[]).length, 10000));
   }catch{ computeKPIs([]); }
 }
 
@@ -423,13 +475,9 @@ function computeKPIs(rows){
   let longCnt=0, shortCnt=0, wins=0, losses=0, totalPNL=0;
   for(const x of rows){
     const side = pick(x,'side');
-    if(side==='long') longCnt++;
-    else if(side==='short') shortCnt++;
+    if(side==='long') longCnt++; else if(side==='short') shortCnt++;
     const pnl = Number(pick(x,'pnl','pnl_usd'));
-    if(!Number.isNaN(pnl)){
-      totalPNL+=pnl;
-      if(pnl>0) wins++; else if(pnl<0) losses++;
-    }
+    if(!Number.isNaN(pnl)){ totalPNL+=pnl; if(pnl>0) wins++; else if(pnl<0) losses++; }
   }
   const totalWL=wins+losses;
   const winRate= totalWL>0? (wins/totalWL*100).toFixed(1) : '0.0';
@@ -445,7 +493,11 @@ function computeKPIs(rows){
   document.getElementById('kpiTotalTrades').textContent = (longCnt + shortCnt);
 }
 
-// --------- Manual trade actions ----------
+// ---------- Errors, clock, actions ----------
+function setLastError(msg){ document.getElementById('dbgError').textContent = 'Son hata: ' + msg; toast(msg); }
+function tickClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
+setInterval(tickClock, 1000); tickClock();
+
 function getSymbol(){ return (document.getElementById('symbolInput').value||'ETHUSDT').trim(); }
 function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value||'10',10)); }
 function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value||'10')); }
@@ -459,11 +511,9 @@ async function manualOpen(side){
     if(!r.ok || j.ok===false) throw new Error(j.error||'order_failed');
     toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
     loadPositions(); loadHistory(100); loadSummary();
-  }catch(e){ toast(`❌ Order failed: ${e.message}`); }
+  }catch(e){ setLastError(`Order failed: ${e.message}`); }
 }
-
 async function manualClose(){ await closeSymbol(getSymbol()); }
-
 async function closeSymbol(symbol){
   try{
     const r=await fetch('/order/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
@@ -471,7 +521,7 @@ async function closeSymbol(symbol){
     if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed');
     toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`);
     loadPositions(); loadHistory(100); loadSummary();
-  }catch(e){ toast(`❌ Close failed: ${e.message}`); }
+  }catch(e){ setLastError(`Close failed: ${e.message}`); }
 }
 
 async function clearHistory(){
@@ -479,9 +529,8 @@ async function clearHistory(){
     const r=await fetch('/history/clear',{method:'POST'});
     const j=await r.json();
     if(!r.ok||j.ok===false) throw new Error(j.error||'clear_failed');
-    toast('🧹 History cleared');
-    loadHistory(100); loadSummary();
-  }catch(e){ toast(`❌ Clear failed: ${e.message}`); }
+    toast('🧹 History cleared'); loadHistory(100); loadSummary();
+  }catch(e){ setLastError(`Clear failed: ${e.message}`); }
 }
 document.getElementById('btnClearHistory').addEventListener('click', clearHistory);
 
