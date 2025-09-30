@@ -40,7 +40,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 /* SIGNALS styles */
 .sig-long{ color: var(--pos); font-weight:700 }
 .sig-short{ color: var(--neg); font-weight:700 }
-.sig-raw{ color: var(--muted); font-weight:600 }
+.sig-raw{ color: var(--muted); font-weight:700 }
 .rule-pass{ background:#0b2a15; border-color:#16452a; color:#b7f0c3 }
 .rule-warn{ background:#2a210b; border-color:#4a3c13; color:#f0e0b7 }
 .rule-fail{ background:#2a0b0b; border-color:#4a1717; color:#f0b7b7 }
@@ -56,10 +56,15 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 <div class="container">
   <div class="header">
     <h1>Scalper Dashboard</h1>
-    <div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · DB: <span id="dbSize">—</span> · <span id="clock"></span></div>
+    <div class="badge">
+      <span id="symbolsBadge">SYMBOLS</span> ·
+      <span id="streamBadge">STREAM</span> ·
+      DB: <span id="dbSize">—</span> ·
+      <span id="clock"></span>
+    </div>
   </div>
 
-  <!-- KPI BAR (7 kutu) -->
+  <!-- KPI BAR -->
   <div class="kpis">
     <div class="kpi"><div class="label">Toplam Long (kapandı)</div><div class="value" id="kpiLong">0</div></div>
     <div class="kpi"><div class="label">Toplam Short (kapandı)</div><div class="value" id="kpiShort">0</div></div>
@@ -70,14 +75,26 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
     <div class="kpi"><div class="label">Toplam İşlem</div><div class="value" id="kpiTotalTrades">0</div></div>
   </div>
 
-  <!-- Manual Trade Paneli -->
+  <!-- Manual Trade -->
   <div class="card">
     <h2>Manual Trade</h2>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-      <div><div class="label muted">Symbol</div><input id="symbolInput" class="input" value="ETHUSDT" /></div>
+      <div>
+        <div class="label muted">Symbol</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="symbolInput" class="input" value="ETHUSDT" />
+          <div class="hint">Hızlı:</div>
+          <button class="btn" onclick="setSymbol('ETHUSDT')">ETHUSDT</button>
+          <button class="btn" onclick="setSymbol('BTCUSDT')">BTCUSDT</button>
+        </div>
+      </div>
       <div><div class="label muted">Leverage</div><input id="levInput" class="input" type="number" value="10" /></div>
       <div><div class="label muted">Margin (USD)</div><input id="marginInput" class="input" type="number" value="10" /></div>
-      <div style="display:flex;gap:8px"><button class="btn" onclick="manualOpen('long')">Open LONG</button><button class="btn" onclick="manualOpen('short')">Open SHORT</button><button class="btn" onclick="manualClose()">Close</button></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="manualOpen('long')">Open LONG</button>
+        <button class="btn" onclick="manualOpen('short')">Open SHORT</button>
+        <button class="btn" onclick="manualClose()">Close</button>
+      </div>
     </div>
   </div>
 
@@ -123,7 +140,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
     </details>
   </div>
 
-  <!-- History (Last 100 shown) -->
+  <!-- History (Last 100 / DB 10,000) -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <h2>History (Last 100 / DB 10,000)</h2>
@@ -146,14 +163,17 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
     </div>
   </div>
 </div>
+
 <div id="toast" class="toast">—</div>
+
 <script>
-// --------- Formatting helpers ---------
+// ---------- Helpers ----------
 const fmt2 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(2);
 const fmt4 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(4);
 const fmtQ = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(6);
 const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>el.classList.remove('show'), 2200); }
+function setSymbol(sym){ const el=document.getElementById('symbolInput'); el.value=sym; toast(`Symbol: ${sym}`); }
 
 // Thresholds (Jinja fallbacks)
 const TH = {
@@ -172,16 +192,134 @@ function tickClock(){ document.getElementById('clock').textContent = new Date().
 setInterval(tickClock, 1000); tickClock();
 async function loadHealth(){ try{ const r=await fetch('/health',{cache:'no-store'}); const j=await r.json(); document.getElementById('symbolsBadge').textContent=j?.symbols?.join?.(', ')||'—'; document.getElementById('streamBadge').textContent=j?.stream||'—'; }catch{} }
 
-// Signals decision + render
+// --------- snake_case ↔ camelCase picker ----------
+const pick = (o, ...keys) => {
+  for (const k of keys) {
+    if (o==null) continue;
+    if (k in o) return o[k];
+    const alt = k.includes('_')
+      ? k.replace(/_([a-z])/g, (_,c)=>c.toUpperCase())
+      : k.replace(/[A-Z]/g, c=>'_'+c.toLowerCase());
+    if (alt in o) return o[alt];
+  }
+  return undefined;
+};
+
+// --------- Normalizers ----------
+function normalizePosition(p){
+  return {
+    symbol: pick(p,'symbol'),
+    side: pick(p,'side'),
+    qty: Number(pick(p,'qty','quantity')),
+    entry: Number(pick(p,'entry','entry_price')),
+    liq_price: Number(pick(p,'liq_price','liq','liquidation_price')),
+    last_price: Number(pick(p,'last_price','last','lastPrice')),
+    pnl: Number(pick(p,'pnl','pnl_usd')),
+    notional_usd: Number(pick(p,'notional_usd','notional')),
+    leverage: Number(pick(p,'leverage','lev'))
+  };
+}
+function normalizeHistoryRow(x){
+  return {
+    symbol: pick(x,'symbol'),
+    side: pick(x,'side'),
+    qty: Number(pick(x,'qty','quantity')),
+    entry: Number(pick(x,'entry','entry_price')),
+    exit: Number(pick(x,'exit','exit_price','close')),
+    pnl: Number(pick(x,'pnl','pnl_usd')),
+    leverage: Number(pick(x,'leverage','lev')),
+    margin_usd: Number(pick(x,'margin_usd','margin')),
+    notional_usd: Number(pick(x,'notional_usd','notional')),
+    liq_price: Number(pick(x,'liq_price','liquidation_price')),
+    opened_at: pick(x,'opened_at','opened','open_time'),
+    closed_at: pick(x,'closed_at','closed','close_time')
+  };
+}
+function normalizeSignal(s){
+  const lp = Number(pick(s,'last_price','price','last'));
+  const vwap = Number(pick(s,'vwap60','vwap'));
+  const emaf = Number(pick(s,'ema_fast','emaf'));
+  const emas = Number(pick(s,'ema_slow','emas'));
+  const rsi = Number(pick(s,'rsi14','rsi'));
+  const atr = Number(pick(s,'atr60','atr'));
+  const tps = Number(pick(s,'tick_rate_2s','tick_rate','ticks_per_sec'));
+  const spr = Number(pick(s,'spread_bps','spread'));
+  const bp  = Number(pick(s,'buy_pressure_2s','buy_pressure','bp'));
+  const imb = Number(pick(s,'imbalance','imb'));
+  const symbol = pick(s,'symbol');
+  const ts = pick(s,'ts','time','timestamp');
+  return { ts, symbol, last_price:lp, vwap60:vwap, ema_fast:emaf, ema_slow:emas, rsi14:rsi, atr60:atr, tick_rate_2s:tps, spread_bps:spr, buy_pressure_2s:bp, imbalance:imb };
+}
+
+// --------- Signals decision + render ----------
 function sideClass(side){ if(!side) return 'sig-raw'; return side==='long'?'sig-long':(side==='short'?'sig-short':'sig-raw'); }
 function sideLabel(side){ return side? side.toUpperCase() : 'RAW'; }
-function ruleBadge(status){ const map={ pass:{cls:'rule-pass',text:'PASS'}, warn:{cls:'rule-warn',text:'WARN'}, fail:{cls:'rule-fail',text:'FAIL'} }; const m = map[status] ?? map.fail; return `<span class="chip ${m.cls}">${m.text}</span>`; }
+function ruleBadge(status){
+  const map={ pass:{cls:'rule-pass',text:'PASS'}, warn:{cls:'rule-warn',text:'WARN'}, fail:{cls:'rule-fail',text:'FAIL'} };
+  const m = map[status] ?? map.fail; return `<span class="chip ${m.cls}">${m.text}</span>`;
+}
 function asPct(x,d=1){ return (x==null)?'-':(x*100).toFixed(d)+'%'; }
-function decideSide(row){ const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s, rsi=row.rsi14; if([ef,es,bp].some(v=>v==null)) return null; if(ef>es && bp>=TH.BUY_PRESSURE_MIN && (rsi==null || rsi<70)) return 'long'; if(ef<es && bp<=1-TH.BUY_PRESSURE_MIN && (rsi==null || rsi>30)) return 'short'; return null; }
+function decideSide(row){
+  const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s, rsi=row.rsi14;
+  if([ef,es,bp].some(v=>v==null)) return null;
+  if(ef>es && bp>=TH.BUY_PRESSURE_MIN && (rsi==null || rsi<70)) return 'long';
+  if(ef<es && bp<=1-TH.BUY_PRESSURE_MIN && (rsi==null || rsi>30)) return 'short';
+  return null;
+}
 
-async function loadSignals(){ const tb=document.getElementById('signalsTBody'); try{ const r=await fetch('/signals',{cache:'no-store'}); const sigs=await r.json(); renderSignalsTable(sigs?.rows||[]); try{ document.getElementById('signalsBox').textContent = JSON.stringify(sigs?.rows||[],null,2);}catch{} }catch{ tb.innerHTML = `<tr><td class="muted" colspan="14">Yüklenemedi.</td></tr>`; document.getElementById('signalsBox').textContent = 'Yüklenemedi.'; } }
+async function loadSignals(){
+  const tb=document.getElementById('signalsTBody');
+  try{
+    const r=await fetch('/signals',{cache:'no-store'});
+    const j=await r.json();
+    const raw = j?.rows ?? j?.data ?? j ?? [];
+    const sigs = Array.isArray(raw) ? raw.map(normalizeSignal) : [];
+    renderSignalsTable(sigs);
+    try{ document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);}catch{}
+  }catch(e){
+    tb.innerHTML = `<tr><td class="muted" colspan="14">Yüklenemedi.</td></tr>`;
+    document.getElementById('signalsBox').textContent = 'Yüklenemedi.';
+    toast(`Signals error: ${e.message}`);
+  }
+}
 
-function renderSignalsTable(sigs){ const tb=document.getElementById('signalsTBody'); tb.innerHTML=''; if(!Array.isArray(sigs)||sigs.length===0){ tb.innerHTML = `<tr><td class="muted" colspan="14">Kayıt yok.</td></tr>`; return; } for(const s of sigs){ const lp=s.last_price, vwap=s.vwap60; const vwapDev=(vwap&&lp)?Math.abs(lp - vwap)/vwap:null; const pass={ tick:(s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC, spread:(s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS, atr:(s.atr60!=null)&&s.atr60>=TH.ATR_MIN&&s.atr60<=TH.ATR_MAX, vwapDev:(vwapDev==null)?false:(vwapDev<=0.002), bp:(s.buy_pressure_2s!=null)&&(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN), imb:(s.imbalance!=null)&&(s.imbalance>=TH.IMB_THRESHOLD), rsiCap:(s.rsi14==null)?true:(s.rsi14<70) }; const keys=Object.keys(pass); const checks=Object.values(pass).filter(Boolean).length; const rulesOK = checks===keys.length; const rulesWARN = !rulesOK && checks>=keys.length-1; const side = decideSide(s); const sideCls=sideClass(side); const sideText=sideLabel(side); const bpCls=(s.buy_pressure_2s==null)?'':(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN?'ok':(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN-0.05?'warn':'bad')); const imbCls=(s.imbalance==null)?'':(s.imbalance>=TH.IMB_THRESHOLD?'ok':(s.imbalance>=TH.IMB_THRESHOLD-0.05?'warn':'bad')); const tickCls=((s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC)?'ok':'bad'; const sprdCls=((s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS)?'ok':'bad'; const atrOk=(s.atr60!=null)&&s.atr60>=TH.ATR_MIN&&s.atr60<=TH.ATR_MAX; const atrCls=atrOk?'ok':'bad'; const vwapCls=(vwapDev!=null)?(vwapDev<=0.002?'ok':'bad'):''; const rulePill = rulesOK?ruleBadge('pass'):(rulesWARN?ruleBadge('warn'):ruleBadge('fail')); const tr=document.createElement('tr'); tr.innerHTML=`
+function renderSignalsTable(sigs){
+  const tb=document.getElementById('signalsTBody');
+  tb.innerHTML='';
+  if(!Array.isArray(sigs)||sigs.length===0){
+    tb.innerHTML = `<tr><td class="muted" colspan="14">Kayıt yok.</td></tr>`; return;
+  }
+  for(const s of sigs){
+    const lp=s.last_price, vwap=s.vwap60;
+    const vwapDev=(vwap&&lp)?Math.abs(lp - vwap)/vwap:null;
+    const pass={
+      tick:(s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC,
+      spread:(s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS,
+      atr:(s.atr60!=null)&&s.atr60>=TH.ATR_MIN&&s.atr60<=TH.ATR_MAX,
+      vwapDev:(vwapDev==null)?false:(vwapDev<=0.002), // ≤0.20%
+      bp:(s.buy_pressure_2s!=null)&&(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN),
+      imb:(s.imbalance!=null)&&(s.imbalance>=TH.IMB_THRESHOLD),
+      rsiCap:(s.rsi14==null)?true:(s.rsi14<70)
+    };
+    const keys=Object.keys(pass);
+    const checks=Object.values(pass).filter(Boolean).length;
+    const rulesOK = checks===keys.length;
+    const rulesWARN = !rulesOK && checks>=keys.length-1;
+    const side = decideSide(s);
+    const sideCls=sideClass(side);
+    const sideText=sideLabel(side);
+
+    const bpCls=(s.buy_pressure_2s==null)?'':(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN?'ok':(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN-0.05?'warn':'bad'));
+    const imbCls=(s.imbalance==null)?'':(s.imbalance>=TH.IMB_THRESHOLD?'ok':(s.imbalance>=TH.IMB_THRESHOLD-0.05?'warn':'bad'));
+    const tickCls=((s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC)?'ok':'bad';
+    const sprdCls=((s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS)?'ok':'bad';
+    const atrOk=(s.atr60!=null)&&s.atr60>=TH.ATR_MIN&&s.atr60<=TH.ATR_MAX;
+    const atrCls=atrOk?'ok':'bad';
+    const vwapCls=(vwapDev!=null)?(vwapDev<=0.002?'ok':'bad'):'';
+    const rulePill = rulesOK?ruleBadge('pass'):(rulesWARN?ruleBadge('warn'):ruleBadge('fail'));
+
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
       <td>${s.ts || '-'}</td>
       <td>${s.symbol || '-'}</td>
       <td><span class="${sideCls}">${sideText}</span></td>
@@ -195,54 +333,167 @@ function renderSignalsTable(sigs){ const tb=document.getElementById('signalsTBod
       <td class="num mono ${sprdCls}">${s.spread_bps!=null ? fmt2(s.spread_bps) : '-'}</td>
       <td class="num mono ${bpCls}">${s.buy_pressure_2s!=null ? asPct(s.buy_pressure_2s,1) : '-'}</td>
       <td class="num mono ${imbCls}">${s.imbalance!=null ? asPct(s.imbalance,1) : '-'}</td>
-      <td>${rulePill}</td>`; tb.appendChild(tr); } }
+      <td>${rulePill}</td>`;
+    tb.appendChild(tr);
+  }
+}
 
-// Positions
-async function loadPositions(){ const body=document.getElementById('posBody'); try{ const r=await fetch('/positions',{cache:'no-store'}); const j=await r.json(); const rows = j?.rows||[]; body.innerHTML=''; if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="10">Pozisyon yok.</td></tr>`; return; } for(const p of rows){ const tr=document.createElement('tr'); tr.innerHTML=`
-        <td>${p.symbol}</td>
-        <td>${p.side}</td>
+// --------- Positions ----------
+async function loadPositions(){
+  const body=document.getElementById('posBody');
+  try{
+    const r=await fetch('/positions',{cache:'no-store'});
+    const j=await r.json();
+    const raw = j?.rows ?? j?.data ?? j ?? [];
+    const rows = Array.isArray(raw) ? raw.map(normalizePosition) : [];
+    body.innerHTML='';
+    if(rows.length===0){
+      body.innerHTML = `<tr><td class="muted" colspan="10">Pozisyon yok.</td></tr>`;
+      return;
+    }
+    for(const p of rows){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td>${p.symbol||'-'}</td>
+        <td>${p.side||'-'}</td>
         <td class="num mono">${fmtQ(p.qty)}</td>
         <td class="num mono">${fmt4(p.entry)}</td>
         <td class="num mono">${fmt4(p.liq_price)}</td>
         <td class="num mono">${fmt4(p.last_price)}</td>
         <td class="num mono ${clsP(p.pnl)}">${fmt2(p.pnl)}</td>
         <td class="num mono">${fmt2(p.notional_usd)}</td>
-        <td class="num mono">${p.leverage??'-'}</td>
-        <td class="num"><button class="btn" onclick="closeSymbol('${p.symbol}')">Close</button></td>`; body.appendChild(tr); } }catch(e){ body.innerHTML = `<tr><td class="muted" colspan="10">Yüklenemedi.</td></tr>`; } }
+        <td class="num mono">${p.leverage||'-'}</td>
+        <td class="num"><button class="btn" onclick="closeSymbol('${p.symbol}')">Close</button></td>`;
+      body.appendChild(tr);
+    }
+  }catch(e){
+    body.innerHTML = `<tr><td class="muted" colspan="10">Yüklenemedi.</td></tr>`;
+    toast(`Positions error: ${e.message}`);
+  }
+}
 
-// History + KPIs
-async function loadHistory(limit=100){ const body=document.getElementById('histBody'); try{ const r=await fetch(`/history?limit=${limit}`,{cache:'no-store'}); const j=await r.json(); const rows=(j&&j.ok&&Array.isArray(j.rows))?j.rows:[]; body.innerHTML=''; if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`; } for(const x of rows){ const tr=document.createElement('tr'); tr.innerHTML=`
-          <td>${x.symbol}</td>
-          <td>${x.side}</td>
-          <td class="num mono">${fmtQ(x.qty)}</td>
-          <td class="num mono">${fmt4(x.entry)}</td>
-          <td class="num mono">${fmt4(x.exit)}</td>
-          <td class="num mono ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
-          <td class="num mono">${x.leverage??'-'}</td>
-          <td class="num mono">${fmt2(x.margin_usd)}</td>
-          <td class="num mono">${fmt2(x.notional_usd)}</td>
-          <td class="num mono">${fmt4(x.liq_price)}</td>
-          <td class="num mono">${x.opened_at||'-'}</td>
-          <td class="num mono">${x.closed_at||'-'}</td>`; body.appendChild(tr); } }catch(e){ body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`; } }
+// --------- History + KPIs ----------
+async function loadHistory(limit=100){
+  const body=document.getElementById('histBody');
+  try{
+    const r=await fetch(`/history?limit=${limit}`,{cache:'no-store'});
+    const j=await r.json();
+    const raw=(j&&j.ok&&Array.isArray(j.rows))?j.rows:(Array.isArray(j)?j:[]);
+    const rows = raw.map(normalizeHistoryRow);
+    body.innerHTML='';
+    if(rows.length===0){
+      body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`;
+      return;
+    }
+    for(const x of rows){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td>${x.symbol}</td>
+        <td>${x.side}</td>
+        <td class="num mono">${fmtQ(x.qty)}</td>
+        <td class="num mono">${fmt4(x.entry)}</td>
+        <td class="num mono">${fmt4(x.exit)}</td>
+        <td class="num mono ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
+        <td class="num mono">${x.leverage??'-'}</td>
+        <td class="num mono">${fmt2(x.margin_usd)}</td>
+        <td class="num mono">${fmt2(x.notional_usd)}</td>
+        <td class="num mono">${fmt4(x.liq_price)}</td>
+        <td class="num mono">${x.opened_at||'-'}</td>
+        <td class="num mono">${x.closed_at||'-'}</td>`;
+      body.appendChild(tr);
+    }
+  }catch(e){
+    body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
+    toast(`History error: ${e.message}`);
+  }
+}
 
-async function loadSummary(){ try{ const r=await fetch('/history?limit=10000',{cache:'no-store'}); const j=await r.json(); const rows = j?.rows || []; computeKPIs(rows); const dbEl=document.getElementById('dbSize'); if(dbEl) dbEl.textContent = String(Math.min(rows.length, 10000)); }catch{ computeKPIs([]); } }
+async function loadSummary(){
+  try{
+    const r=await fetch('/history?limit=10000',{cache:'no-store'});
+    const j=await r.json();
+    const rows = j?.rows || [];
+    computeKPIs(rows);
+    const dbEl=document.getElementById('dbSize');
+    if(dbEl) dbEl.textContent = String(Math.min(rows.length, 10000));
+  }catch{ computeKPIs([]); }
+}
 
-function computeKPIs(rows){ let longCnt=0, shortCnt=0, wins=0, losses=0, totalPNL=0; for(const x of rows){ if(x.side==='long') longCnt++; else if(x.side==='short') shortCnt++; if(typeof x.pnl==='number'){ totalPNL+=x.pnl; if(x.pnl>0) wins++; else if(x.pnl<0) losses++; } } const totalWL=wins+losses; const winRate= totalWL>0? (wins/totalWL*100).toFixed(1) : '0.0'; document.getElementById('kpiLong').textContent=longCnt; document.getElementById('kpiShort').textContent=shortCnt; document.getElementById('kpiWins').textContent=wins; document.getElementById('kpiLosses').textContent=losses; document.getElementById('kpiWinRate').textContent=`${winRate}%`; const pnlEl=document.getElementById('kpiTotalPNL'); pnlEl.textContent=`$${fmt2(totalPNL)}`; pnlEl.classList.remove('pnl-pos','pnl-neg'); pnlEl.classList.add(totalPNL>=0?'pnl-pos':'pnl-neg'); document.getElementById('kpiTotalTrades').textContent = (longCnt + shortCnt); }
+function computeKPIs(rows){
+  let longCnt=0, shortCnt=0, wins=0, losses=0, totalPNL=0;
+  for(const x of rows){
+    const side = pick(x,'side');
+    if(side==='long') longCnt++;
+    else if(side==='short') shortCnt++;
+    const pnl = Number(pick(x,'pnl','pnl_usd'));
+    if(!Number.isNaN(pnl)){
+      totalPNL+=pnl;
+      if(pnl>0) wins++; else if(pnl<0) losses++;
+    }
+  }
+  const totalWL=wins+losses;
+  const winRate= totalWL>0? (wins/totalWL*100).toFixed(1) : '0.0';
+  document.getElementById('kpiLong').textContent=longCnt;
+  document.getElementById('kpiShort').textContent=shortCnt;
+  document.getElementById('kpiWins').textContent=wins;
+  document.getElementById('kpiLosses').textContent=losses;
+  document.getElementById('kpiWinRate').textContent=`${winRate}%`;
+  const pnlEl=document.getElementById('kpiTotalPNL');
+  pnlEl.textContent=`$${fmt2(totalPNL)}`;
+  pnlEl.classList.remove('pnl-pos','pnl-neg');
+  pnlEl.classList.add(totalPNL>=0?'pnl-pos':'pnl-neg');
+  document.getElementById('kpiTotalTrades').textContent = (longCnt + shortCnt);
+}
 
-// Manual trade actions
+// --------- Manual trade actions ----------
 function getSymbol(){ return (document.getElementById('symbolInput').value||'ETHUSDT').trim(); }
 function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value||'10',10)); }
 function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value||'10')); }
-async function manualOpen(side){ const symbol=getSymbol(); const payload={symbol, side, leverage:getLev(), margin_usd:getMargin()}; try{ const r=await fetch('/order/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const j=await r.json(); if(!r.ok || j.ok===false) throw new Error(j.error||'order_failed'); toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`); loadPositions(); loadHistory(100); loadSummary(); }catch(e){ toast(`❌ Order failed: ${e.message}`); } }
-async function manualClose(){ await closeSymbol(getSymbol()); }
-async function closeSymbol(symbol){ try{ const r=await fetch('/order/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})}); const j=await r.json(); if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed'); toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`); loadPositions(); loadHistory(100); loadSummary(); }catch(e){ toast(`❌ Close failed: ${e.message}`); } }
-async function clearHistory(){ try{ const r=await fetch('/history/clear',{method:'POST'}); const j=await r.json(); if(!r.ok||j.ok===false) throw new Error(j.error||'clear_failed'); toast('🧹 History cleared'); loadHistory(100); loadSummary(); }catch(e){ toast(`❌ Clear failed: ${e.message}`); } }
 
+async function manualOpen(side){
+  const symbol=getSymbol();
+  const payload={symbol, side, leverage:getLev(), margin_usd:getMargin()};
+  try{
+    const r=await fetch('/order/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const j=await r.json();
+    if(!r.ok || j.ok===false) throw new Error(j.error||'order_failed');
+    toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
+    loadPositions(); loadHistory(100); loadSummary();
+  }catch(e){ toast(`❌ Order failed: ${e.message}`); }
+}
+
+async function manualClose(){ await closeSymbol(getSymbol()); }
+
+async function closeSymbol(symbol){
+  try{
+    const r=await fetch('/order/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
+    const j=await r.json();
+    if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed');
+    toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`);
+    loadPositions(); loadHistory(100); loadSummary();
+  }catch(e){ toast(`❌ Close failed: ${e.message}`); }
+}
+
+async function clearHistory(){
+  try{
+    const r=await fetch('/history/clear',{method:'POST'});
+    const j=await r.json();
+    if(!r.ok||j.ok===false) throw new Error(j.error||'clear_failed');
+    toast('🧹 History cleared');
+    loadHistory(100); loadSummary();
+  }catch(e){ toast(`❌ Clear failed: ${e.message}`); }
+}
 document.getElementById('btnClearHistory').addEventListener('click', clearHistory);
 
-// Init & Polling
-async function init(){ await loadHealth(); await Promise.all([loadPositions(), loadSignals(), loadHistory(100), loadSummary()]); }
-init(); setInterval(loadSignals, 1000); setInterval(loadPositions, 3000); setInterval(()=>loadHistory(100), 5000);
+// --------- Init & Polling ----------
+async function init(){
+  await loadHealth();
+  await Promise.all([loadPositions(), loadSignals(), loadHistory(100), loadSummary()]);
+}
+init();
+setInterval(loadSignals, 1000);
+setInterval(loadPositions, 3000);
+setInterval(()=>loadHistory(100), 5000);
 </script>
 </body>
 </html>
