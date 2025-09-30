@@ -203,5 +203,9 @@ async def dashboard(request: Request):
     }
     return templates.TemplateResponse(
         "dashboard.html",
-        {"request": request, "thresholds": thresholds}
+        {
+            "request": request,
+            "thresholds": thresholds,
+            "fee_rate": settings.FEE_RATE,   # 👈 EK
+        }
     )
