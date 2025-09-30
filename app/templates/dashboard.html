@@ -7,13 +7,16 @@
   <style>
     :root {
       --bg:#0f1115; --panel:#171a21; --fg:#e8eaf0; --muted:#9aa3b2;
-      --pos:#17a34a; --neg:#ef4444; --thead:#212634; --line:#232838; --accent:#3b82f6; --warn:#ffb020;
+      --pos:#17a34a; --neg:#ef4444; --thead:#212634; --line:#232838; --accent:#3b82f6;
     }
     html,body{background:var(--bg);color:var(--fg);margin:0;font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
     .wrap{max-width:1280px;margin:24px auto;padding:0 16px}
     h1{font-size:28px;margin:0 0 10px}
     h2{font-size:18px;margin:0 0 12px}
-    .card{background:var(--panel);border-radius:14px;padding:16px 16px 12px;box-shadow:0 8px 18px rgba(0,0,0,.25);margin-bottom:18px}
+    .row{display:grid;gap:18px}
+    @media(min-width:1000px){.row{grid-template-columns:2fr 1fr}}
+    .row-1{display:grid;gap:18px;grid-template-columns:1fr}
+    .card{background:var(--panel);border-radius:14px;padding:16px 16px 12px;box-shadow:0 8px 18px rgba(0,0,0,.25)}
     table{width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden}
     thead th{background:var(--thead);color:var(--fg);font-weight:700;padding:10px;border-bottom:1px solid var(--line);text-align:left}
     tbody td{padding:10px;border-bottom:1px solid var(--line)}
@@ -33,20 +36,10 @@
     .input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:90px}
     .toast{position:fixed;right:16px;bottom:16px;background:#0c111b;border:1px solid #223049;color:#e8eaf0;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:all .2s}
     .toast.show{opacity:1;transform:translateY(0)}
-    /* signals table helpers */
-    .ok{color:var(--pos);font-weight:600}
-    .bad{color:var(--neg);font-weight:600}
-    .warn{color:var(--warn);font-weight:600}
-    .chip{padding:.1rem .35rem;border-radius:.35rem;background:#111827;border:1px solid #1f2937}
-    details summary{cursor:pointer;list-style:none}
-    details summary::-webkit-details-marker{display:none}
-    .mono{font-variant-numeric:tabular-nums}
-    /* KPI şeridi */
-    .kpis{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);margin-bottom:16px}
-    .kpi{background:#0e1420;border:1px solid var(--line);border-radius:12px;padding:12px}
-    .kpi .label{color:var(--muted);font-size:12px;margin-bottom:6px}
-    .kpi .value{font-size:22px;font-weight:700}
-    @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+    .kpis{display:flex;gap:10px;flex-wrap:wrap}
+    .kpi{background:#0e1420;border:1px solid var(--line);padding:10px 12px;border-radius:12px;min-width:140px}
+    .kpi .t{font-size:12px;color:var(--muted)}
+    .kpi .v{font-size:18px;font-weight:800;margin-top:4px}
   </style>
 </head>
 <body>
@@ -56,32 +49,34 @@
     <div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · <span id="clock"></span></div>
   </div>
 
-  <!-- KPI BAR: toplam long/short, win/loss, winrate -->
-  <div class="kpis">
-    <div class="kpi">
-      <div class="label">Toplam Long (kapandı)</div>
-      <div class="value" id="kpiLong">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Toplam Short (kapandı)</div>
-      <div class="value" id="kpiShort">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Kârla Kapanan (Win)</div>
-      <div class="value ok" id="kpiWins">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Zararla Kapanan (Loss)</div>
-      <div class="value bad" id="kpiLosses">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Win Rate</div>
-      <div class="value" id="kpiWinRate">0%</div>
+  <!-- ÜST ÖZET KPIs -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="t">Toplam Long (son 100)</div>
+        <div class="v" id="kpiLong">-</div>
+      </div>
+      <div class="kpi">
+        <div class="t">Toplam Short (son 100)</div>
+        <div class="v" id="kpiShort">-</div>
+      </div>
+      <div class="kpi">
+        <div class="t">Kazanan (PnL &gt; 0)</div>
+        <div class="v" id="kpiWins">-</div>
+      </div>
+      <div class="kpi">
+        <div class="t">Kaybeden (PnL ≤ 0)</div>
+        <div class="v" id="kpiLosses">-</div>
+      </div>
+      <div class="kpi">
+        <div class="t">Toplam PnL $ (son 100)</div>
+        <div class="v" id="kpiTotalPnl">-</div>
+      </div>
     </div>
   </div>
 
   <!-- Manuel Trade Paneli -->
-  <div class="card">
+  <div class="card" style="margin-bottom:18px">
     <h2>Manual Trade</h2>
     <div class="controls">
       <label>Leverage
@@ -106,99 +101,76 @@
     </div>
   </div>
 
-  <!-- Open Positions -->
-  <div class="card">
-    <h2>Open Positions</h2>
-    <table id="posTable">
-      <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>Side</th>
-          <th class="num">Qty</th>
-          <th class="num">Entry</th>
-          <th class="num">TP</th>
-          <th class="num">SL</th>
-          <th class="num">Entry $</th>
-          <th class="num">TP $</th>
-          <th class="num">SL $</th>
-          <th class="num">PnL $</th>
-          <th class="num">Lev.</th>
-          <th class="num">Margin $</th>
-          <th class="num">Notional $</th>
-          <th class="num">Liq. Px</th>
-          <th class="num">Opened At</th>
-        </tr>
-      </thead>
-      <tbody id="posBody">
-        <tr><td class="muted" colspan="15">Yükleniyor…</td></tr>
-      </tbody>
-    </table>
-    <div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
-  </div>
-
-  <!-- Signals (live) -->
-  <div class="card">
-    <h2>Signals (live)</h2>
-    <div class="hint" style="margin-bottom:8px">
-      Filtre eşikleri — Tick/s ≥ 2.0, Spread bps ≤ 5, BuyPress ≥ 0.55, Imbalance ≥ 0.9, ATR ∈ [0.0002, 0.05], VWAP sapma ≤ 0.20%.
-    </div>
-    <div class="table-responsive">
-      <table class="table-compact" style="width:100%">
+  <!-- Orta: Positions -->
+  <div class="row-1">
+    <div class="card">
+      <h2>Open Positions</h2>
+      <table id="posTable">
         <thead>
           <tr>
             <th>Symbol</th>
             <th>Side</th>
-            <th class="num">Last</th>
-            <th class="num">EMAf</th>
-            <th class="num">EMAs</th>
-            <th class="num">RSI14</th>
-            <th class="num">VWAP (60s)</th>
-            <th class="num">ATR (60s)</th>
-            <th class="num">Tick/s</th>
-            <th class="num">Spread bps</th>
-            <th class="num">BuyPress</th>
-            <th class="num">Imb</th>
-            <th class="num">Rules</th>
+            <th class="num">Qty</th>
+            <th class="num">Entry</th>
+            <th class="num">TP</th>
+            <th class="num">SL</th>
+            <th class="num">Entry $</th>
+            <th class="num">TP $</th>
+            <th class="num">SL $</th>
+            <th class="num">PnL $</th>
+            <th class="num">Lev.</th>
+            <th class="num">Margin $</th>
+            <th class="num">Notional $</th>
+            <th class="num">Liq. Px</th>
+            <th class="num">Opened At</th>
           </tr>
         </thead>
-        <tbody id="signalsTBody">
-          <tr><td class="muted" colspan="13">Yükleniyor…</td></tr>
+        <tbody id="posBody">
+          <tr><td class="muted" colspan="15">Yükleniyor…</td></tr>
+        </tbody>
+      </table>
+      <div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Signals (raw)</h2>
+        <button class="btn" onclick="copySignals()">Kopyala</button>
+      </div>
+      <pre id="signalsBox">Yükleniyor…</pre>
+      <div class="hint">Anlık yön/filtre görünümü ham JSON olarak gösterilir.</div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>History (Last 100)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn" onclick="loadHistory()">Yenile</button>
+          <button class="btn" onclick="clearHistory()">Clear History</button>
+        </div>
+      </div>
+      <table id="histTable">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th class="num">Qty</th>
+            <th class="num">Entry</th>
+            <th class="num">Exit</th>
+            <th class="num">PnL $</th>
+            <th class="num">Lev.</th>
+            <th class="num">Margin $</th>
+            <th class="num">Notional $</th>
+            <th class="num">Liq. Px</th>
+            <th class="num">Opened</th>
+            <th class="num">Closed</th>
+          </tr>
+        </thead>
+        <tbody id="histBody">
+          <tr><td class="muted" colspan="12">Yükleniyor…</td></tr>
         </tbody>
       </table>
     </div>
-    <details style="margin-top:10px">
-      <summary class="muted">Ham JSON’u göster</summary>
-      <pre id="signalsBox" style="margin-top:8px">Yükleniyor…</pre>
-    </details>
-  </div>
-
-  <!-- History -->
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h2>History (Last 100)</h2>
-      <button class="btn" onclick="loadHistory()">Yenile</button>
-    </div>
-    <table id="histTable">
-      <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>Side</th>
-          <th class="num">Qty</th>
-          <th class="num">Entry</th>
-          <th class="num">Exit</th>
-          <th class="num">PnL $</th>
-          <th class="num">Lev.</th>
-          <th class="num">Margin $</th>
-          <th class="num">Notional $</th>
-          <th class="num">Liq. Px</th>
-          <th class="num">Opened</th>
-          <th class="num">Closed</th>
-        </tr>
-      </thead>
-      <tbody id="histBody">
-        <tr><td class="muted" colspan="12">Yükleniyor…</td></tr>
-      </tbody>
-    </table>
   </div>
 </div>
 
@@ -219,7 +191,7 @@
   };
   const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
 
-  // header badges
+  // ---------- header badges ----------
   async function loadHealth(){
     try{
       const r = await fetch('/healthz',{cache:'no-store'}); const j = await r.json();
@@ -229,7 +201,7 @@
   }
   setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString('tr-TR');},1000);
 
-  // positions
+  // ---------- positions ----------
   async function loadPositions(){
     const body = document.getElementById('posBody');
     try{
@@ -272,134 +244,82 @@
     }
   }
 
-  // signals (tablo + ham json)
-  function decideSide(row){
-    const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s, rsi=row.rsi14;
-    if([ef,es,bp].some(v=>v==null)) return null;
-    if(ef>es && bp>=0.55 && (rsi==null || rsi<70)) return 'long';
-    if(ef<es && bp<=0.45 && (rsi==null || rsi>30)) return 'short';
-    return null;
-  }
-  function cls(ok){ return ok ? 'ok' : 'bad'; }
-  function f2(x){ return (x==null||isNaN(x)) ? '—' : Number(x).toFixed(2); }
-  function f4(x){ return (x==null||isNaN(x)) ? '—' : Number(x).toFixed(4); }
-
+  // ---------- signals ----------
   async function loadSignals(){
     try{
-      const r = await fetch('/signals',{cache:'no-store'});
-      const sigs = await r.json();
-      renderSignalsTable(sigs);
-      document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);
+      const r = await fetch('/signals',{cache:'no-store'}); const j = await r.json();
+      document.getElementById('signalsBox').textContent = JSON.stringify(j,null,2);
     }catch{ document.getElementById('signalsBox').textContent = 'Yüklenemedi.'; }
   }
-  function renderSignalsTable(sigs){
-    const tb = document.getElementById('signalsTBody');
-    tb.innerHTML = '';
-    const entries = Object.entries(sigs||{});
-    if(entries.length===0){ tb.innerHTML = '<tr><td class="muted" colspan="13">Veri yok.</td></tr>'; return; }
-
-    for(const [sym, s] of entries){
-      const side = decideSide(s);
-      const vwap = s.vwap60, lp = s.last_price;
-      const vwapDev = (vwap && lp) ? Math.abs(lp - vwap)/vwap : null;
-
-      const pass = {
-        tick: (s.tick_rate_2s??0) >= 2.0,
-        spread: (s.spread_bps??Infinity) <= 5,
-        atr: (s.atr60!=null) && s.atr60 >= 0.0002 && s.atr60 <= 0.05,
-        vwapDev: (vwapDev==null) ? false : (vwapDev <= 0.002),
-        bp: (s.buy_pressure_2s!=null) && (s.buy_pressure_2s >= 0.55),
-        imb: (s.imbalance!=null) && (s.imbalance >= 0.9),
-        rsiCap: (s.rsi14==null) ? true : (s.rsi14 < 70)
-      };
-      const rulesOK = pass.tick && pass.spread && pass.atr && pass.vwapDev && pass.bp && pass.imb && pass.rsiCap;
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><span class="chip">${sym}</span></td>
-        <td class="mono ${ side?'ok':'muted' }">${ side ?? '—' }</td>
-        <td class="num">${ f2(s.last_price) }</td>
-        <td class="num">${ f2(s.ema_fast) }</td>
-        <td class="num">${ f2(s.ema_slow) }</td>
-        <td class="num ${(s.rsi14!=null && (s.rsi14<30 || s.rsi14>70)) ? 'warn' : ''}">${ f2(s.rsi14) }</td>
-        <td class="num">${ f2(s.vwap60) } ${ vwapDev!=null ? `<span class="${cls(pass.vwapDev)}">(${(vwapDev*100).toFixed(2)}%)</span>` : '' }</td>
-        <td class="num ${cls(pass.atr)}">${ f4(s.atr60) }</td>
-        <td class="num ${cls(pass.tick)}">${ f2(s.tick_rate_2s) }</td>
-        <td class="num ${cls(pass.spread)}">${ f4(s.spread_bps) }</td>
-        <td class="num ${cls(pass.bp)}">${ s.buy_pressure_2s==null?'—':f2(s.buy_pressure_2s) }</td>
-        <td class="num ${cls(pass.imb)}">${ s.imbalance==null?'—':f2(s.imbalance) }</td>
-        <td class="mono ${ rulesOK ? 'ok' : 'bad' }">${ rulesOK ? 'OK' : 'FAIL' }</td>
-      `;
-      tb.appendChild(tr);
-    }
+  function copySignals(){
+    const txt = document.getElementById('signalsBox').textContent || '';
+    navigator.clipboard.writeText(txt).then(()=>toast('📋 Signals kopyalandı'));
   }
 
-  // history + KPI özet
-  async function loadHistory(limit=100){
+  // ---------- history + KPIs ----------
+  async function loadHistory(){
     const body = document.getElementById('histBody');
     try{
-      const r = await fetch(`/history?limit=${limit}`,{cache:'no-store'}); const j = await r.json();
+      const r = await fetch('/history?limit=100',{cache:'no-store'}); const j = await r.json();
       const rows = (j && j.ok && Array.isArray(j.rows)) ? j.rows : [];
-      // tablo
-      if(limit===100){
-        body.innerHTML = '';
-        if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`; }
-        for(const x of rows){
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${x.symbol}</td>
-            <td>${x.side}</td>
-            <td class="num">${fmtQ(x.qty)}</td>
-            <td class="num">${fmt4(x.entry)}</td>
-            <td class="num">${fmt4(x.exit)}</td>
-            <td class="num ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
-            <td class="num">${x.leverage ?? '-'}</td>
-            <td class="num">${fmt2(x.margin_usd)}</td>
-            <td class="num">${fmt2(x.notional_usd)}</td>
-            <td class="num">${fmt4(x.liq_price)}</td>
-            <td class="num">${x.opened_at || '-'}</td>
-            <td class="num">${x.closed_at || '-'}</td>
-          `;
-          body.appendChild(tr);
-        }
+      // KPIs hesapla
+      let longC=0, shortC=0, wins=0, losses=0, totalPnl=0;
+      for(const x of rows){
+        if(x.side==='long') longC++; else if(x.side==='short') shortC++;
+        const pnl = Number(x.pnl||0);
+        totalPnl += pnl;
+        if(pnl>0) wins++; else losses++;
       }
-      // KPI (daha geniş limit ile say)
-      computeKPIs(rows);
+      // KPI yaz
+      document.getElementById('kpiLong').textContent = longC.toString();
+      document.getElementById('kpiShort').textContent = shortC.toString();
+      document.getElementById('kpiWins').textContent = wins.toString();
+      document.getElementById('kpiLosses').textContent = losses.toString();
+      const kpiP = document.getElementById('kpiTotalPnl');
+      kpiP.textContent = new Intl.NumberFormat('tr-TR',{minimumFractionDigits:2, maximumFractionDigits:2}).format(totalPnl);
+      kpiP.classList.remove('pnl-pos','pnl-neg');
+      kpiP.classList.add( (totalPnl>=0)?'pnl-pos':'pnl-neg' );
+
+      // Tablo
+      body.innerHTML = '';
+      if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`; return; }
+      for(const x of rows){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${x.symbol}</td>
+          <td>${x.side}</td>
+          <td class="num">${fmtQ(x.qty)}</td>
+          <td class="num">${fmt4(x.entry)}</td>
+          <td class="num">${fmt4(x.exit)}</td>
+          <td class="num ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
+          <td class="num">${x.leverage ?? '-'}</td>
+          <td class="num">${fmt2(x.margin_usd)}</td>
+          <td class="num">${fmt2(x.notional_usd)}</td>
+          <td class="num">${fmt4(x.liq_price)}</td>
+          <td class="num">${x.opened_at || '-'}</td>
+          <td class="num">${x.closed_at || '-'}</td>
+        `;
+        body.appendChild(tr);
+      }
     }catch(e){
-      if(limit===100) body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
-      computeKPIs([]);
+      body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
     }
   }
 
-  async function loadSummary(){
-    // kpi için daha büyük örneklem – istersen 10000 yapabilirsin
-    const r = await fetch('/history?limit=1000',{cache:'no-store'});
-    const j = await r.json();
-    const rows = (j && j.ok && Array.isArray(j.rows)) ? j.rows : [];
-    computeKPIs(rows);
-  }
-
-  function computeKPIs(rows){
-    let longCnt=0, shortCnt=0, wins=0, losses=0;
-    for(const x of rows){
-      if(x.side==='long') longCnt++;
-      else if(x.side==='short') shortCnt++;
-      if(typeof x.pnl === 'number'){
-        if(x.pnl>0) wins++;
-        else if(x.pnl<0) losses++;
-      }
+  // ---------- history temizleme ----------
+  async function clearHistory(){
+    try{
+      const res = await fetch('/admin/clear_history',{method:'POST'});
+      const j = await res.json();
+      if(!res.ok || j.ok===false) throw new Error(j.error||'clear_failed');
+      toast('🧹 History temizlendi');
+      loadHistory(); // KPIs da güncellenir
+    }catch(e){
+      toast('❌ History temizlenemedi: '+e.message);
     }
-    const totalWL = wins+losses;
-    const winRate = totalWL>0 ? (wins/totalWL*100).toFixed(1) : '0.0';
-
-    document.getElementById('kpiLong').textContent = longCnt;
-    document.getElementById('kpiShort').textContent = shortCnt;
-    document.getElementById('kpiWins').textContent = wins;
-    document.getElementById('kpiLosses').textContent = losses;
-    document.getElementById('kpiWinRate').textContent = `${winRate}%`;
   }
 
-  // manuel trade butonları
+  // ---------- manuel trade butonları ----------
   function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value || '10', 10)); }
   function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value || '10')); }
 
@@ -412,7 +332,7 @@
       const j = await r.json();
       if(!r.ok || j.ok===false){ throw new Error(j.error || 'order_failed'); }
       toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
-      loadPositions(); loadHistory(); loadSummary();
+      loadPositions(); loadHistory();
     }catch(e){
       toast(`❌ Order failed: ${e.message}`);
     }
@@ -425,14 +345,14 @@
       });
       const j = await r.json();
       if(!r.ok || j.ok===false){ throw new Error(j.error || 'close_failed'); }
-      toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`);
-      loadPositions(); loadHistory(); loadSummary();
+      toast(`ℹ️ ${symbol} closed. PnL=$${(j.closed?.pnl!=null)? nf2.format(j.closed.pnl):'-'}`);
+      loadPositions(); loadHistory();
     }catch(e){
       toast(`❌ Close failed: ${e.message}`);
     }
   }
 
-  // küçük toast
+  // ---------- küçük toast ----------
   function toast(msg){
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -440,11 +360,11 @@
     setTimeout(()=>t.classList.remove('show'), 2500);
   }
 
-  // kick
+  // ---------- kick ----------
   loadHealth();
   loadPositions(); loadSignals(); loadHistory();
   setInterval(loadPositions, 2000);
-  setInterval(loadSignals, 2000);
+  setInterval(loadSignals, 4000);
   setInterval(loadHistory, 10000);
 </script>
 </body>
