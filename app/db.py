@@ -28,6 +28,16 @@ CREATE TABLE IF NOT EXISTS trades (
 );
 CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+
+MIGRATIONS = [
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS leverage INT",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS margin_usd DOUBLE PRECISION",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS notional_usd DOUBLE PRECISION",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS liq_price DOUBLE PRECISION",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS open_ts BIGINT",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_ts BIGINT",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS raw JSONB",
+]
 """
 
 async def init_pool():
