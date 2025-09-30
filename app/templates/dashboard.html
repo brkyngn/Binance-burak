@@ -5,28 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Scalper Dashboard</title>
 <style>
-:root{
-  --bg:#0b1020;
-  --card:#0e1420;
-  --line:#1f2937;
-  --fg:#e7ecf5;
-  --muted:#93a0b8;
-  --pos:#22c55e;
-  --neg:#ef4444;
-  --warn:#f59e0b;
-}
+:root{ --bg:#0b1020; --card:#0e1420; --line:#1f2937; --fg:#e7ecf5; --muted:#93a0b8; --pos:#22c55e; --neg:#ef4444; --warn:#f59e0b; }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"}
-
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial}
 .container{max-width:1280px;margin:0 auto;padding:16px}
 .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .badge{color:var(--muted);font-size:12px}
-
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:14px}
 .card h2{margin:0 0 8px;font-size:16px}
 .hint{color:var(--muted);font-size:12px}
-
 .table-responsive{overflow:auto}
 .table-compact{width:100%;border-collapse:separate;border-spacing:0}
 .table-compact th,.table-compact td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
@@ -37,30 +25,18 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 .pnl-neg{color:var(--neg);font-weight:700}
 .muted{color:var(--muted)}
 .mono{font-variant-numeric:tabular-nums}
-
-/* inputs & buttons */
-.input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:90px}
-.btn{background:#111827;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:8px 10px;font-weight:600;cursor:pointer}
-.btn:hover{filter:brightness(1.1)}
-
-/* toast */
-.toast{position:fixed;right:16px;bottom:16px;background:#0c111b;border:1px solid #223049;color:#e8eaf0;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:all .2s}
-.toast.show{opacity:1;transform:translateY(0)}
-
-/* signals helpers */
 .ok{color:var(--pos);font-weight:600}
 .bad{color:var(--neg);font-weight:600}
 .warn{color:var(--warn);font-weight:600}
 .chip{padding:.1rem .35rem;border-radius:.35rem;background:#111827;border:1px solid #1f2937}
 .chip.num{font-variant-numeric:tabular-nums}
-
-/* KPI şeridi */
-.kpis{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);margin-bottom:16px}
+/* KPI */
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(7,1fr);margin-bottom:16px}
 .kpi{background:#0e1420;border:1px solid var(--line);border-radius:12px;padding:12px}
 .kpi .label{color:var(--muted);font-size:12px;margin-bottom:6px}
 .kpi .value{font-size:22px;font-weight:700}
-@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
-
+@media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:700px){.kpis{grid-template-columns:repeat(2,1fr)}}
 /* SIGNALS styles */
 .sig-long{ color: var(--pos); font-weight:700 }
 .sig-short{ color: var(--neg); font-weight:700 }
@@ -68,66 +44,205 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 .rule-pass{ background:#0b2a15; border-color:#16452a; color:#b7f0c3 }
 .rule-warn{ background:#2a210b; border-color:#4a3c13; color:#f0e0b7 }
 .rule-fail{ background:#2a0b0b; border-color:#4a1717; color:#f0b7b7 }
-
+/* Toast */
+.toast{position:fixed;right:16px;bottom:16px;background:#0c111b;border:1px solid #223049;color:#e8eaf0;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:all .2s}
+.toast.show{opacity:1;transform:translateY(0)}
+.btn{background:#111827;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:8px 10px;font-weight:600;cursor:pointer}
+.btn:hover{filter:brightness(1.1)}
+.input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:120px}
 </style>
 </head>
 <body>
 <div class="container">
   <div class="header">
     <h1>Scalper Dashboard</h1>
-    <div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · <span id="clock"></span></div>
+    <div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · DB: <span id="dbSize">—</span> · <span id="clock"></span></div>
   </div>
 
-  <!-- KPI BAR -->
+  <!-- KPI BAR (7 kutu) -->
   <div class="kpis">
-    <div class="kpi">
-      <div class="label">Toplam Long (kapandı)</div>
-      <div class="value" id="kpiLong">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Toplam Short (kapandı)</div>
-      <div class="value" id="kpiShort">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Kârla Kapanan (Win)</div>
-      <div class="value ok" id="kpiWins">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Zararla Kapanan (Loss)</div>
-      <div class="value bad" id="kpiLosses">0</div>
-    </div>
-    <div class="kpi">
-      <div class="label">Win Rate</div>
-      <div class="value" id="kpiWinRate">0%</div>
-    </div>
+    <div class="kpi"><div class="label">Toplam Long (kapandı)</div><div class="value" id="kpiLong">0</div></div>
+    <div class="kpi"><div class="label">Toplam Short (kapandı)</div><div class="value" id="kpiShort">0</div></div>
+    <div class="kpi"><div class="label">Başarılı (Kârlı) İşlem</div><div class="value ok" id="kpiWins">0</div></div>
+    <div class="kpi"><div class="label">Başarısız (Zararlı) İşlem</div><div class="value bad" id="kpiLosses">0</div></div>
+    <div class="kpi"><div class="label">Başarı Oranı</div><div class="value" id="kpiWinRate">0%</div></div>
+    <div class="kpi"><div class="label">Toplam PNL</div><div class="value" id="kpiTotalPNL">$0.00</div></div>
+    <div class="kpi"><div class="label">Toplam İşlem</div><div class="value" id="kpiTotalTrades">0</div></div>
   </div>
 
   <!-- Manual Trade Paneli -->
-  ... (aynı içerik yukarıdaki gibi kalıyor) ...
+  <div class="card">
+    <h2>Manual Trade</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div><div class="label muted">Symbol</div><input id="symbolInput" class="input" value="ETHUSDT" /></div>
+      <div><div class="label muted">Leverage</div><input id="levInput" class="input" type="number" value="10" /></div>
+      <div><div class="label muted">Margin (USD)</div><input id="marginInput" class="input" type="number" value="10" /></div>
+      <div style="display:flex;gap:8px"><button class="btn" onclick="manualOpen('long')">Open LONG</button><button class="btn" onclick="manualOpen('short')">Open SHORT</button><button class="btn" onclick="manualClose()">Close</button></div>
+    </div>
+  </div>
 
+  <!-- Open Positions -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Open Positions</h2>
+      <div class="hint">Canlı pozisyonlar</div>
+    </div>
+    <div class="table-responsive">
+      <table class="table-compact" id="posTable">
+        <thead><tr>
+          <th>Symbol</th><th>Side</th>
+          <th class="num">Qty</th><th class="num">Entry</th><th class="num">Liq</th><th class="num">Last</th>
+          <th class="num">PNL $</th><th class="num">Notional</th><th class="num">Lev</th><th></th>
+        </tr></thead>
+        <tbody id="posBody"><tr><td class="muted" colspan="10">Bekleniyor…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
+  </div>
+
+  <!-- Signals (live) -->
+  <div class="card">
+    <h2>Signals (live)</h2>
+    <div class="hint" style="margin-bottom:8px">
+      Tick/s ≥ <b>{{ thresholds.MIN_TICKS_PER_SEC|default(2.0) }}</b>, Spread bps ≤ <b>{{ thresholds.MAX_SPREAD_BPS|default(5) }}</b>, BuyPress ≥ <b>{{ thresholds.BUY_PRESSURE_MIN|default(0.55) }}</b>, Imbalance ≥ <b>{{ thresholds.IMB_THRESHOLD|default(0.9) }}</b>, ATR ∈ [<b>{{ thresholds.ATR_MIN|default(0.0002) }}</b>, <b>{{ thresholds.ATR_MAX|default(0.05) }}</b>], VWAP sapma ≤ <b>0.20%</b>.
+    </div>
+    <div class="table-responsive">
+      <table class="table-compact" style="width:100%">
+        <thead><tr>
+          <th>Time</th><th>Symbol</th><th>Signal</th>
+          <th class="num">Price</th><th class="num">EMAf</th><th class="num">EMAs</th><th class="num">RSI14</th>
+          <th class="num">VWAP (60s)</th><th class="num">ATR (60s)</th>
+          <th class="num">Tick/s</th><th class="num">Spread bps</th><th class="num">BuyPress</th><th class="num">Imb</th>
+          <th>Rules</th>
+        </tr></thead>
+        <tbody id="signalsTBody"><tr><td class="muted" colspan="14">Bekleniyor…</td></tr></tbody>
+      </table>
+    </div>
+    <details style="margin-top:10px"><summary>Ham JSON</summary>
+      <pre id="signalsBox" class="mono" style="max-height:280px;overflow:auto;margin-top:8px">—</pre>
+    </details>
+  </div>
+
+  <!-- History (Last 100 shown) -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>History (Last 100 / DB 10,000)</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn" id="btnClearHistory">Clear History</button>
+        <span class="hint">Gösterim 100; KPI & özet 10,000</span>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table-compact" id="histTable">
+        <thead><tr>
+          <th>Symbol</th><th>Side</th>
+          <th class="num">Qty</th><th class="num">Entry</th><th class="num">Exit</th>
+          <th class="num">PNL</th><th class="num">Lev</th><th class="num">Margin</th>
+          <th class="num">Notional</th><th class="num">Liq</th>
+          <th class="num">Opened</th><th class="num">Closed</th>
+        </tr></thead>
+        <tbody id="histBody"><tr><td class="muted" colspan="12">Bekleniyor…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast">—</div>
 <script>
-// --- History + KPIs ---
-async function loadHistory(limit=100){
-  const body=document.getElementById('histBody');
-  try{
-    const r=await fetch(`/history?limit=${limit}`,{cache:'no-store'}); const j=await r.json();
-    const rows=(j&&j.ok&&Array.isArray(j.rows))?j.rows:[];
-    if(limit===100){
-      body.innerHTML='';
-      if(rows.length===0){ body.innerHTML = `<tr><td class=\"muted\" colspan=\"12\">Kayıt yok.</td></tr>`; }
-      for(const x of rows){
-        const tr=document.createElement('tr');
-        tr.innerHTML=`...`; // tablo satırları
-        body.appendChild(tr);
-      }
-    }
-    computeKPIs(rows);
-  }catch(e){ if(limit===100) body.innerHTML = `<tr><td class=\"muted\" colspan=\"12\">Yüklenemedi.</td></tr>`; computeKPIs([]); }
-}
+// --------- Formatting helpers ---------
+const fmt2 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(2);
+const fmt4 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(4);
+const fmtQ = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(6);
+const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
+function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>el.classList.remove('show'), 2200); }
 
-async function loadSummary(){
-  try{ const r=await fetch('/history?limit=10000',{cache:'no-store'}); const j=await r.json(); computeKPIs(j?.rows||[]);}catch{ computeKPIs([]); }
-}
+// Thresholds (Jinja fallbacks)
+const TH = {
+  MIN_TICKS_PER_SEC: {{ thresholds.MIN_TICKS_PER_SEC|default(2.0) }},
+  MAX_SPREAD_BPS: {{ thresholds.MAX_SPREAD_BPS|default(5) }},
+  BUY_PRESSURE_MIN: {{ thresholds.BUY_PRESSURE_MIN|default(0.55) }},
+  IMB_THRESHOLD: {{ thresholds.IMB_THRESHOLD|default(0.9) }},
+  ATR_MIN: {{ thresholds.ATR_MIN|default(0.0002) }},
+  ATR_MAX: {{ thresholds.ATR_MAX|default(0.05) }},
+  VWAP_WINDOW_SEC: {{ thresholds.VWAP_WINDOW_SEC|default(60) }},
+  ATR_WINDOW_SEC: {{ thresholds.ATR_WINDOW_SEC|default(60) }},
+};
+
+// Clock & health
+function tickClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
+setInterval(tickClock, 1000); tickClock();
+async function loadHealth(){ try{ const r=await fetch('/health',{cache:'no-store'}); const j=await r.json(); document.getElementById('symbolsBadge').textContent=j?.symbols?.join?.(', ')||'—'; document.getElementById('streamBadge').textContent=j?.stream||'—'; }catch{} }
+
+// Signals decision + render
+function sideClass(side){ if(!side) return 'sig-raw'; return side==='long'?'sig-long':(side==='short'?'sig-short':'sig-raw'); }
+function sideLabel(side){ return side? side.toUpperCase() : 'RAW'; }
+function ruleBadge(status){ const map={ pass:{cls:'rule-pass',text:'PASS'}, warn:{cls:'rule-warn',text:'WARN'}, fail:{cls:'rule-fail',text:'FAIL'} }; const m = map[status] ?? map.fail; return `<span class="chip ${m.cls}">${m.text}</span>`; }
+function asPct(x,d=1){ return (x==null)?'-':(x*100).toFixed(d)+'%'; }
+function decideSide(row){ const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s, rsi=row.rsi14; if([ef,es,bp].some(v=>v==null)) return null; if(ef>es && bp>=TH.BUY_PRESSURE_MIN && (rsi==null || rsi<70)) return 'long'; if(ef<es && bp<=1-TH.BUY_PRESSURE_MIN && (rsi==null || rsi>30)) return 'short'; return null; }
+
+async function loadSignals(){ const tb=document.getElementById('signalsTBody'); try{ const r=await fetch('/signals',{cache:'no-store'}); const sigs=await r.json(); renderSignalsTable(sigs?.rows||[]); try{ document.getElementById('signalsBox').textContent = JSON.stringify(sigs?.rows||[],null,2);}catch{} }catch{ tb.innerHTML = `<tr><td class="muted" colspan="14">Yüklenemedi.</td></tr>`; document.getElementById('signalsBox').textContent = 'Yüklenemedi.'; } }
+
+function renderSignalsTable(sigs){ const tb=document.getElementById('signalsTBody'); tb.innerHTML=''; if(!Array.isArray(sigs)||sigs.length===0){ tb.innerHTML = `<tr><td class="muted" colspan="14">Kayıt yok.</td></tr>`; return; } for(const s of sigs){ const lp=s.last_price, vwap=s.vwap60; const vwapDev=(vwap&&lp)?Math.abs(lp - vwap)/vwap:null; const pass={ tick:(s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC, spread:(s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS, atr:(s.atr60!=null)&&s.atr60>=TH.ATR_MIN&&s.atr60<=TH.ATR_MAX, vwapDev:(vwapDev==null)?false:(vwapDev<=0.002), bp:(s.buy_pressure_2s!=null)&&(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN), imb:(s.imbalance!=null)&&(s.imbalance>=TH.IMB_THRESHOLD), rsiCap:(s.rsi14==null)?true:(s.rsi14<70) }; const keys=Object.keys(pass); const checks=Object.values(pass).filter(Boolean).length; const rulesOK = checks===keys.length; const rulesWARN = !rulesOK && checks>=keys.length-1; const side = decideSide(s); const sideCls=sideClass(side); const sideText=sideLabel(side); const bpCls=(s.buy_pressure_2s==null)?'':(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN?'ok':(s.buy_pressure_2s>=TH.BUY_PRESSURE_MIN-0.05?'warn':'bad')); const imbCls=(s.imbalance==null)?'':(s.imbalance>=TH.IMB_THRESHOLD?'ok':(s.imbalance>=TH.IMB_THRESHOLD-0.05?'warn':'bad')); const tickCls=((s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC)?'ok':'bad'; const sprdCls=((s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS)?'ok':'bad'; const atrOk=(s.atr60!=null)&&s.atr60>=TH.ATR_MIN&&s.atr60<=TH.ATR_MAX; const atrCls=atrOk?'ok':'bad'; const vwapCls=(vwapDev!=null)?(vwapDev<=0.002?'ok':'bad'):''; const rulePill = rulesOK?ruleBadge('pass'):(rulesWARN?ruleBadge('warn'):ruleBadge('fail')); const tr=document.createElement('tr'); tr.innerHTML=`
+      <td>${s.ts || '-'}</td>
+      <td>${s.symbol || '-'}</td>
+      <td><span class="${sideCls}">${sideText}</span></td>
+      <td class="num mono">${lp!=null ? fmt4(lp) : '-'}</td>
+      <td class="num mono">${s.ema_fast!=null ? fmt4(s.ema_fast) : '-'}</td>
+      <td class="num mono">${s.ema_slow!=null ? fmt4(s.ema_slow) : '-'}</td>
+      <td class="num mono">${s.rsi14!=null ? fmt2(s.rsi14) : '-'}</td>
+      <td class="num mono ${vwapCls}">${vwap!=null ? fmt4(vwap) : '-'}</td>
+      <td class="num mono ${atrCls}">${s.atr60!=null ? fmt4(s.atr60) : '-'}</td>
+      <td class="num mono ${tickCls}">${s.tick_rate_2s!=null ? fmt2(s.tick_rate_2s) : '-'}</td>
+      <td class="num mono ${sprdCls}">${s.spread_bps!=null ? fmt2(s.spread_bps) : '-'}</td>
+      <td class="num mono ${bpCls}">${s.buy_pressure_2s!=null ? asPct(s.buy_pressure_2s,1) : '-'}</td>
+      <td class="num mono ${imbCls}">${s.imbalance!=null ? asPct(s.imbalance,1) : '-'}</td>
+      <td>${rulePill}</td>`; tb.appendChild(tr); } }
+
+// Positions
+async function loadPositions(){ const body=document.getElementById('posBody'); try{ const r=await fetch('/positions',{cache:'no-store'}); const j=await r.json(); const rows = j?.rows||[]; body.innerHTML=''; if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="10">Pozisyon yok.</td></tr>`; return; } for(const p of rows){ const tr=document.createElement('tr'); tr.innerHTML=`
+        <td>${p.symbol}</td>
+        <td>${p.side}</td>
+        <td class="num mono">${fmtQ(p.qty)}</td>
+        <td class="num mono">${fmt4(p.entry)}</td>
+        <td class="num mono">${fmt4(p.liq_price)}</td>
+        <td class="num mono">${fmt4(p.last_price)}</td>
+        <td class="num mono ${clsP(p.pnl)}">${fmt2(p.pnl)}</td>
+        <td class="num mono">${fmt2(p.notional_usd)}</td>
+        <td class="num mono">${p.leverage??'-'}</td>
+        <td class="num"><button class="btn" onclick="closeSymbol('${p.symbol}')">Close</button></td>`; body.appendChild(tr); } }catch(e){ body.innerHTML = `<tr><td class="muted" colspan="10">Yüklenemedi.</td></tr>`; } }
+
+// History + KPIs
+async function loadHistory(limit=100){ const body=document.getElementById('histBody'); try{ const r=await fetch(`/history?limit=${limit}`,{cache:'no-store'}); const j=await r.json(); const rows=(j&&j.ok&&Array.isArray(j.rows))?j.rows:[]; body.innerHTML=''; if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`; } for(const x of rows){ const tr=document.createElement('tr'); tr.innerHTML=`
+          <td>${x.symbol}</td>
+          <td>${x.side}</td>
+          <td class="num mono">${fmtQ(x.qty)}</td>
+          <td class="num mono">${fmt4(x.entry)}</td>
+          <td class="num mono">${fmt4(x.exit)}</td>
+          <td class="num mono ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
+          <td class="num mono">${x.leverage??'-'}</td>
+          <td class="num mono">${fmt2(x.margin_usd)}</td>
+          <td class="num mono">${fmt2(x.notional_usd)}</td>
+          <td class="num mono">${fmt4(x.liq_price)}</td>
+          <td class="num mono">${x.opened_at||'-'}</td>
+          <td class="num mono">${x.closed_at||'-'}</td>`; body.appendChild(tr); } }catch(e){ body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`; } }
+
+async function loadSummary(){ try{ const r=await fetch('/history?limit=10000',{cache:'no-store'}); const j=await r.json(); const rows = j?.rows || []; computeKPIs(rows); const dbEl=document.getElementById('dbSize'); if(dbEl) dbEl.textContent = String(Math.min(rows.length, 10000)); }catch{ computeKPIs([]); } }
+
+function computeKPIs(rows){ let longCnt=0, shortCnt=0, wins=0, losses=0, totalPNL=0; for(const x of rows){ if(x.side==='long') longCnt++; else if(x.side==='short') shortCnt++; if(typeof x.pnl==='number'){ totalPNL+=x.pnl; if(x.pnl>0) wins++; else if(x.pnl<0) losses++; } } const totalWL=wins+losses; const winRate= totalWL>0? (wins/totalWL*100).toFixed(1) : '0.0'; document.getElementById('kpiLong').textContent=longCnt; document.getElementById('kpiShort').textContent=shortCnt; document.getElementById('kpiWins').textContent=wins; document.getElementById('kpiLosses').textContent=losses; document.getElementById('kpiWinRate').textContent=`${winRate}%`; const pnlEl=document.getElementById('kpiTotalPNL'); pnlEl.textContent=`$${fmt2(totalPNL)}`; pnlEl.classList.remove('pnl-pos','pnl-neg'); pnlEl.classList.add(totalPNL>=0?'pnl-pos':'pnl-neg'); document.getElementById('kpiTotalTrades').textContent = (longCnt + shortCnt); }
+
+// Manual trade actions
+function getSymbol(){ return (document.getElementById('symbolInput').value||'ETHUSDT').trim(); }
+function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value||'10',10)); }
+function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value||'10')); }
+async function manualOpen(side){ const symbol=getSymbol(); const payload={symbol, side, leverage:getLev(), margin_usd:getMargin()}; try{ const r=await fetch('/order/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const j=await r.json(); if(!r.ok || j.ok===false) throw new Error(j.error||'order_failed'); toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`); loadPositions(); loadHistory(100); loadSummary(); }catch(e){ toast(`❌ Order failed: ${e.message}`); } }
+async function manualClose(){ await closeSymbol(getSymbol()); }
+async function closeSymbol(symbol){ try{ const r=await fetch('/order/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})}); const j=await r.json(); if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed'); toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`); loadPositions(); loadHistory(100); loadSummary(); }catch(e){ toast(`❌ Close failed: ${e.message}`); } }
+async function clearHistory(){ try{ const r=await fetch('/history/clear',{method:'POST'}); const j=await r.json(); if(!r.ok||j.ok===false) throw new Error(j.error||'clear_failed'); toast('🧹 History cleared'); loadHistory(100); loadSummary(); }catch(e){ toast(`❌ Clear failed: ${e.message}`); } }
+
+document.getElementById('btnClearHistory').addEventListener('click', clearHistory);
+
+// Init & Polling
+async function init(){ await loadHealth(); await Promise.all([loadPositions(), loadSignals(), loadHistory(100), loadSummary()]); }
+init(); setInterval(loadSignals, 1000); setInterval(loadPositions, 3000); setInterval(()=>loadHistory(100), 5000);
 </script>
 </body>
 </html>
