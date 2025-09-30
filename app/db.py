@@ -41,13 +41,20 @@ MIGRATIONS = [
 """
 
 async def init_pool():
-    """DB pool + DDL."""
     global _pool
     if not settings.DATABASE_URL:
         return
     _pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=5)
     async with _pool.acquire() as conn:
+        # tablo yoksa oluştur
         await conn.execute(DDL)
+        # eksik kolonları ekle (idempotent)
+        for sql in MIGRATIONS:
+            try:
+                await conn.execute(sql)
+            except Exception:
+                # eşzamanlı deploy vb. durumlarda hata görmezden gelebiliriz
+                pass
 
 async def ping() -> bool:
     """Basit bağlantı testi."""
