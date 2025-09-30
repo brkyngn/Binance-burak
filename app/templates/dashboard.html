@@ -32,6 +32,10 @@
     .hint{color:var(--muted);font-size:12px}
     .btn{background:#0f172a;border:1px solid var(--line);color:var(--fg);padding:6px 10px;border-radius:10px;cursor:pointer}
     .btn:hover{border-color:#364055}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+    .input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:90px}
+    .toast{position:fixed;right:16px;bottom:16px;background:#0c111b;border:1px solid #223049;color:#e8eaf0;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:all .2s}
+    .toast.show{opacity:1;transform:translateY(0)}
   </style>
 </head>
 <body>
@@ -39,6 +43,32 @@
   <div class="toolbar">
     <h1>Scalper Dashboard</h1>
     <div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · <span id="clock"></span></div>
+  </div>
+
+  <!-- Manuel Trade Paneli -->
+  <div class="card" style="margin-bottom:18px">
+    <h2>Manual Trade</h2>
+    <div class="controls">
+      <label>Leverage
+        <input id="levInput" class="input" type="number" value="10" min="1" step="1" />
+      </label>
+      <label>Margin $
+        <input id="marginInput" class="input" type="number" value="10" min="1" step="1" />
+      </label>
+      <span class="hint">Qty verilmezse qty = (margin × lev) / price olarak sunucu tarafında hesaplanır.</span>
+    </div>
+    <div class="controls">
+      <strong>BTCUSDT:</strong>
+      <button class="btn" onclick="order('BTCUSDT','long')">Long</button>
+      <button class="btn" onclick="order('BTCUSDT','short')">Short</button>
+      <button class="btn" onclick="closePos('BTCUSDT')">Close</button>
+    </div>
+    <div class="controls">
+      <strong>ETHUSDT:</strong>
+      <button class="btn" onclick="order('ETHUSDT','long')">Long</button>
+      <button class="btn" onclick="order('ETHUSDT','short')">Short</button>
+      <button class="btn" onclick="closePos('ETHUSDT')">Close</button>
+    </div>
   </div>
 
   <!-- ÜST SATIR: Positions + Signals -->
@@ -75,7 +105,7 @@
     <div class="card">
       <h2>Signals (raw)</h2>
       <pre id="signalsBox">Yükleniyor…</pre>
-      <div class="hint">Burada anlık yön/filtre görünümü ham JSON olarak gösterilir.</div>
+      <div class="hint">Anlık yön/filtre görünümü ham JSON olarak gösterilir.</div>
     </div>
   </div>
 
@@ -110,6 +140,8 @@
     </div>
   </div>
 </div>
+
+<div id="toast" class="toast"></div>
 
 <script>
   // ---------- format helpers ----------
@@ -216,6 +248,47 @@
     }catch(e){
       body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
     }
+  }
+
+  // ---------- manuel trade butonları ----------
+  function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value || '10', 10)); }
+  function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value || '10')); }
+
+  async function order(symbol, side){
+    try{
+      const payload = { symbol, side, leverage: getLev(), margin_usd: getMargin() };
+      const r = await fetch('/paper/order', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      });
+      const j = await r.json();
+      if(!r.ok || j.ok===false){ throw new Error(j.error || 'order_failed'); }
+      toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
+      loadPositions(); loadHistory();
+    }catch(e){
+      toast(`❌ Order failed: ${e.message}`);
+    }
+  }
+
+  async function closePos(symbol){
+    try{
+      const r = await fetch('/paper/close', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({symbol})
+      });
+      const j = await r.json();
+      if(!r.ok || j.ok===false){ throw new Error(j.error || 'close_failed'); }
+      toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`);
+      loadPositions(); loadHistory();
+    }catch(e){
+      toast(`❌ Close failed: ${e.message}`);
+    }
+  }
+
+  // ---------- küçük toast ----------
+  function toast(msg){
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'), 2500);
   }
 
   // ---------- kick ----------
