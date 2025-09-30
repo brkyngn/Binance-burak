@@ -130,8 +130,13 @@ async def paper_close(symbol: str = Body(..., embed=True)):
 async def history(limit: int = 50):
     if not settings.DATABASE_URL:
         return JSONResponse({"ok": False, "error": "DATABASE_URL not set"}, status_code=400)
-    rows = await fetch_recent(limit=limit)
-    return JSONResponse({"ok": True, "rows": rows})
+    try:
+        rows = await fetch_recent(limit=limit)
+        return JSONResponse({"ok": True, "rows": rows})
+    except Exception as e:
+        # burada hata mesajını döndürerek hızlı teşhis yaparız
+        logger.exception("history error: %s", e)
+        return JSONResponse({"ok": False, "error": f"history_failed: {type(e).__name__}: {e}"}, status_code=500)
 
 # -----------------------------
 # Dashboard Page
