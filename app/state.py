@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from dataclasses import dataclass
 from math import fabs
 from typing import Deque, Dict, List, Optional, Tuple
 
@@ -35,8 +34,8 @@ class SymbolState:
         symbol: str,
         ema_fast: int = 5,
         ema_slow: int = 20,
-        trade_maxlen: int = 3000,
-        depth_maxlen: int = 200,
+        trade_maxlen: int = 6000,
+        depth_maxlen: int = 400,
     ):
         self.symbol = symbol
 
@@ -164,7 +163,7 @@ class SymbolState:
             return None
         return buy / total
 
-    # --------- Yeni: Volume Spike (5s vs 60s ortalama 5s) ----------
+    # --------- Volume Spike (5s vs 60s ortalama) ----------
     def volume_spike_ratio(self, short_ms: int = 5000, long_ms: int = 60000) -> Optional[float]:
         now = self.last_ts or now_ms()
         cut_s = now - short_ms
@@ -179,12 +178,12 @@ class SymbolState:
                 vol_s += q
         if vol_l <= 0:
             return None
-        avg_5s = vol_l * (short_ms / long_ms)  # 60s'lik toplamın 5s'e ölçeklenmiş ortalaması
+        avg_5s = vol_l * (short_ms / long_ms)
         if avg_5s <= 0:
             return None
         return vol_s / avg_5s
 
-    # --------- Yeni: CVD (window içi) ----------
+    # --------- CVD (10dk varsayılan) ----------
     def cvd(self, window_ms: int = 600_000) -> Optional[float]:
         now = self.last_ts or now_ms()
         cut = now - window_ms
@@ -198,12 +197,8 @@ class SymbolState:
             s += (q if is_buy else -q)
         return s if seen else None
 
-    # --------- Yeni: basit S/R yakınlığı ----------
+    # --------- Basit S/R yakınlığı ----------
     def sr_near_pct(self, window_ms: int = 1_800_000, swing_k: int = 3) -> Optional[float]:
-        """
-        Son 30dk içinde basit swing-high/low (k-adımlı) seviyeleri bul,
-        mevcut fiyata en yakın seviyenin göreli mesafesini (%) döndür.
-        """
         if not self.last_price:
             return None
         cut = (self.last_ts or now_ms()) - window_ms
@@ -231,6 +226,35 @@ class SymbolState:
         lp = self.last_price
         return min(abs(lp - L) / lp for L in levels)
 
+    # --------- 5s "mum yönü" (bear/bull/doji) ----------
+    def candle_dir(self, window_ms: int = 5000) -> Optional[str]:
+        now = self.last_ts or now_ms()
+        cut = now - window_ms
+        # son pencere için O/H/L/C
+        opened = None
+        high = None
+        low = None
+        close = None
+        seen = False
+        for ts, p, _, _ in self.trades:
+            if ts < cut:
+                continue
+            seen = True
+            if opened is None:
+                opened = p
+                high = p
+                low = p
+            high = max(high, p)
+            low = min(low, p)
+            close = p
+        if not seen or opened is None or close is None:
+            return None
+        if close > opened and (close - opened) / opened > 1e-6:
+            return "bull"
+        if close < opened and (opened - close) / opened > 1e-6:
+            return "bear"
+        return "doji"
+
 # -----------------------------
 # MarketState
 # -----------------------------
@@ -245,7 +269,6 @@ class MarketState:
             self.symbols[symbol] = SymbolState(symbol)
 
     def on_agg_trade(self, symbol: str, price: float, qty: float, ts: int, buyer_is_maker: Optional[bool]):
-        # Binance 'm' True => buyer is maker => agresör SELL => buy_aggr = not m
         is_buy_aggr = None if buyer_is_maker is None else (not buyer_is_maker)
         self.ensure(symbol)
         return self.symbols[symbol].on_trade(price, qty, ts, is_buy_aggr)
@@ -273,6 +296,7 @@ class MarketState:
                 "vol_spike_5s": st.volume_spike_ratio(5_000, 60_000),
                 "cvd_10m": st.cvd(600_000),
                 "sr_dist_pct": st.sr_near_pct(1_800_000, 3),
+                "candle5_dir": st.candle_dir(5_000),
                 "last_ts": st.last_ts,
             }
         return out
