@@ -1,14 +1,7 @@
 # app/config.py
-# Pydantic v2 ile BaseSettings -> pydantic_settings paketine taşındı.
-# Aşağıdaki import bloğu hem v2 (tercihen) hem v1 ile geri uyumludur.
-try:
-    from pydantic_settings import BaseSettings
-except Exception:  # pydantic v1 fallback (eski ortamlar)
-    from pydantic import BaseSettings  # type: ignore
-
+from pydantic_settings import BaseSettings  # <- v2: BaseSettings buraya taşındı
 from typing import List
 import os
-
 
 def _csv_env(name: str, default: str = "") -> List[str]:
     raw = os.getenv(name, default)
@@ -16,15 +9,14 @@ def _csv_env(name: str, default: str = "") -> List[str]:
         return []
     return [x.strip() for x in raw.split(",") if x.strip()]
 
-
 class Settings(BaseSettings):
     # --- Binance WS ---
     WS_URL: str = os.getenv("WS_URL", "wss://stream.binance.com:9443/stream")
-    STREAM: str = os.getenv("STREAM", "aggTrade")          # trades: "aggTrade"
+    STREAM: str = os.getenv("STREAM", "aggTrade")
     ENABLE_DEPTH: bool = os.getenv("ENABLE_DEPTH", "true").lower() == "true"
-    DEPTH_STREAM: str = os.getenv("DEPTH_STREAM", "bookTicker")  # depth top: "bookTicker"
+    DEPTH_STREAM: str = os.getenv("DEPTH_STREAM", "bookTicker")
 
-    # Symbols (CSV: "BTCUSDT,ETHUSDT")
+    # Symbols (CSV)
     SYMBOLS: List[str] = _csv_env("SYMBOLS", "BTCUSDT,ETHUSDT")
 
     # Reconnect/backoff
@@ -49,23 +41,21 @@ class Settings(BaseSettings):
     MIN_TICKS_PER_SEC: float = float(os.getenv("MIN_TICKS_PER_SEC", "1.0"))
     MAX_SPREAD_BPS: float = float(os.getenv("MAX_SPREAD_BPS", "5"))  # bps
     ATR_MIN: float = float(os.getenv("ATR_MIN", "0.0002"))
-    ATR_MAX: float = float(os.getenv("ATR_MAX", "0.05"))  # güvenlik tavanı
+    ATR_MAX: float = float(os.getenv("ATR_MAX", "0.05"))
     BUY_PRESSURE_MIN: float = float(os.getenv("BUY_PRESSURE_MIN", "0.55"))
     IMB_THRESHOLD: float = float(os.getenv("IMB_THRESHOLD", "0.9"))
 
-    # Leverage / Margin (yeni)
-    LEVERAGE: int = int(os.getenv("LEVERAGE", "10"))                # 10x
-    MARGIN_PER_TRADE: float = float(os.getenv("MARGIN_PER_TRADE", "10"))  # $10 marj
-    MAINT_MARGIN_RATE: float = float(os.getenv("MAINT_MARGIN_RATE", "0.004"))  # ~0.4%
-    FEE_RATE: float = float(os.getenv("FEE_RATE", "0.0004"))        # 4 bps varsayılan
+    # Leverage / Margin
+    LEVERAGE: int = int(os.getenv("LEVERAGE", "10"))
+    MARGIN_PER_TRADE: float = float(os.getenv("MARGIN_PER_TRADE", "10"))
+    MAINT_MARGIN_RATE: float = float(os.getenv("MAINT_MARGIN_RATE", "0.004"))
+    FEE_RATE: float = float(os.getenv("FEE_RATE", "0.0004"))
 
     # DB
     DATABASE_URL: str | None = os.getenv("DATABASE_URL")
 
-    class Config:
-        # pydantic v1 uyumu için (v2'de etkisiz)
-        case_sensitive = False
+    model_config = {
+        "case_sensitive": False
+    }
 
-
-# Tekil settings objesi
 settings = Settings()
