@@ -92,5 +92,14 @@ class Settings(BaseSettings):
     def SYMBOLS(self) -> List[str]:
         return _parse_symbols_str(self.SYMBOLS_RAW)
 
+    # --- Fees (Futures) ---
+    FEE_MODE: str = os.getenv("FEE_MODE", "taker")          # "taker" | "maker"
+    FEE_TAKER: float = float(os.getenv("FEE_TAKER", "0.0004"))
+    FEE_MAKER: float = float(os.getenv("FEE_MAKER", "0.0002"))
+
+    # BNB ile komisyon ödeme simülasyonu
+    PAY_FEES_IN_BNB: bool = os.getenv("PAY_FEES_IN_BNB", "false").lower() == "true"
+    BNB_FEE_DISCOUNT: float = float(os.getenv("BNB_FEE_DISCOUNT", "0.10"))  # %10 ind.
+
 
 settings = Settings()
