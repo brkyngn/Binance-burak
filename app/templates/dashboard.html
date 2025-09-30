@@ -6,56 +6,105 @@
   <title>Scalper Dashboard</title>
   <style>
     :root {
-      --bg: #0f1115; --panel: #171a21; --fg: #e8eaf0; --muted:#9aa3b2;
-      --pos:#17a34a; --neg:#ef4444; --thead:#212634; --line:#232838;
+      --bg:#0f1115; --panel:#171a21; --fg:#e8eaf0; --muted:#9aa3b2;
+      --pos:#17a34a; --neg:#ef4444; --thead:#212634; --line:#232838; --accent:#3b82f6;
     }
-    html,body {background:var(--bg); color:var(--fg); margin:0; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;}
-    .wrap {max-width: 1280px; margin: 24px auto; padding: 0 16px;}
-    h1 {font-size: 34px; margin: 0 0 16px 0;}
-    .card {background: var(--panel); border-radius: 14px; padding: 18px; box-shadow: 0 10px 18px rgba(0,0,0,.2);}
-    table {width:100%; border-collapse: collapse; overflow: hidden; border-radius: 12px;}
-    thead th {background: var(--thead); color: var(--fg); font-weight: 700; padding: 12px; border-bottom: 1px solid var(--line); text-align: left;}
-    tbody td {padding: 12px; border-bottom: 1px solid var(--line);}
-    .num {text-align: right; font-variant-numeric: tabular-nums;}
-    .muted {color: var(--muted);}
-    .pnl-pos {color: var(--pos); font-weight: 700;}
-    .pnl-neg {color: var(--neg); font-weight: 700;}
-    .pair {letter-spacing: .3px; font-weight: 600;}
-    .side-long {color: var(--pos); font-weight: 700;}
-    .side-short {color: #f59e0b; font-weight: 700;}
-    .grid {display:grid; gap: 18px;}
-    @media (min-width: 900px){ .grid {grid-template-columns: 1fr;} }
+    html,body{background:var(--bg);color:var(--fg);margin:0;font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:1280px;margin:24px auto;padding:0 16px}
+    h1{font-size:28px;margin:0 0 10px}
+    h2{font-size:18px;margin:0 0 12px}
+    .row{display:grid;gap:18px}
+    @media(min-width:1000px){.row{grid-template-columns:2fr 1fr}}
+    @media(min-width:1200px){.row-3{grid-template-columns:2fr 1fr}}
+    .card{background:var(--panel);border-radius:14px;padding:16px 16px 12px;box-shadow:0 8px 18px rgba(0,0,0,.25)}
+    table{width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden}
+    thead th{background:var(--thead);color:var(--fg);font-weight:700;padding:10px;border-bottom:1px solid var(--line);text-align:left}
+    tbody td{padding:10px;border-bottom:1px solid var(--line)}
+    .num{text-align:right;font-variant-numeric:tabular-nums}
+    .muted{color:var(--muted)}
+    .pnl-pos{color:var(--pos);font-weight:700}
+    .pnl-neg{color:var(--neg);font-weight:700}
+    .side-long{color:var(--pos);font-weight:700}
+    .side-short{color:#f59e0b;font-weight:700}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0c0f14;border:1px solid var(--line);padding:10px;border-radius:10px;max-height:420px;overflow:auto}
+    .toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:6px 0 14px}
+    .badge{background:#0e1420;border:1px solid var(--line);padding:6px 10px;border-radius:999px}
+    .hint{color:var(--muted);font-size:12px}
+    .btn{background:#0f172a;border:1px solid var(--line);color:var(--fg);padding:6px 10px;border-radius:10px;cursor:pointer}
+    .btn:hover{border-color:#364055}
   </style>
 </head>
-
 <body>
 <div class="wrap">
-  <h1>Open Positions</h1>
+  <div class="toolbar">
+    <h1>Scalper Dashboard</h1>
+    <div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · <span id="clock"></span></div>
+  </div>
 
-  <div class="grid">
+  <!-- ÜST SATIR: Positions + Signals -->
+  <div class="row">
     <div class="card">
+      <h2>Open Positions</h2>
       <table id="posTable">
         <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>Side</th>
-          <th class="num">Qty</th>
-          <th class="num">Entry</th>
-          <th class="num">TP</th>
-          <th class="num">SL</th>
-          <th class="num">Entry $</th>
-          <th class="num">TP $</th>
-          <th class="num">SL $</th>
-          <th class="num">PnL $</th>
-          <th class="num">Lev.</th>
-          <th class="num">Margin $</th>
-          <th class="num">Notional $</th>
-          <th class="num">Liq. Px</th>
-          <th class="num">Opened At</th>
-        </tr>
+          <tr>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th class="num">Qty</th>
+            <th class="num">Entry</th>
+            <th class="num">TP</th>
+            <th class="num">SL</th>
+            <th class="num">Entry $</th>
+            <th class="num">TP $</th>
+            <th class="num">SL $</th>
+            <th class="num">PnL $</th>
+            <th class="num">Lev.</th>
+            <th class="num">Margin $</th>
+            <th class="num">Notional $</th>
+            <th class="num">Liq. Px</th>
+            <th class="num">Opened At</th>
+          </tr>
         </thead>
         <tbody id="posBody">
-        <tr><td class="muted" colspan="15">Yükleniyor…</td></tr>
+          <tr><td class="muted" colspan="15">Yükleniyor…</td></tr>
+        </tbody>
+      </table>
+      <div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
+    </div>
+
+    <div class="card">
+      <h2>Signals (raw)</h2>
+      <pre id="signalsBox">Yükleniyor…</pre>
+      <div class="hint">Burada anlık yön/filtre görünümü ham JSON olarak gösterilir.</div>
+    </div>
+  </div>
+
+  <!-- ALT SATIR: History -->
+  <div class="row-3" style="margin-top:18px">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>History (Last 100)</h2>
+        <button class="btn" onclick="loadHistory()">Yenile</button>
+      </div>
+      <table id="histTable">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th class="num">Qty</th>
+            <th class="num">Entry</th>
+            <th class="num">Exit</th>
+            <th class="num">PnL $</th>
+            <th class="num">Lev.</th>
+            <th class="num">Margin $</th>
+            <th class="num">Notional $</th>
+            <th class="num">Liq. Px</th>
+            <th class="num">Opened</th>
+            <th class="num">Closed</th>
+          </tr>
+        </thead>
+        <tbody id="histBody">
+          <tr><td class="muted" colspan="12">Yükleniyor…</td></tr>
         </tbody>
       </table>
     </div>
@@ -63,75 +112,118 @@
 </div>
 
 <script>
-  // ----- format helpers (TR yerelleştirme) -----
-  const nf2 = new Intl.NumberFormat('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-  const nf4 = new Intl.NumberFormat('tr-TR', {minimumFractionDigits: 4, maximumFractionDigits: 4});
-  const nfQty = new Intl.NumberFormat('tr-TR', {minimumFractionDigits: 5, maximumFractionDigits: 5});
-
-  const fmt2 = x => (x == null || isNaN(x)) ? '-' : nf2.format(+x);
-  const fmt4 = x => (x == null || isNaN(x)) ? '-' : nf4.format(+x);
-  const fmtQty = x => (x == null || isNaN(x)) ? '-' : nfQty.format(+x);
+  // ---------- format helpers ----------
+  const nf2  = new Intl.NumberFormat('tr-TR',{minimumFractionDigits:2, maximumFractionDigits:2});
+  const nf4  = new Intl.NumberFormat('tr-TR',{minimumFractionDigits:4, maximumFractionDigits:4});
+  const nfQ  = new Intl.NumberFormat('tr-TR',{minimumFractionDigits:5, maximumFractionDigits:5});
+  const fmt2 = x => (x==null||isNaN(x)) ? '-' : nf2.format(+x);
+  const fmt4 = x => (x==null||isNaN(x)) ? '-' : nf4.format(+x);
+  const fmtQ = x => (x==null||isNaN(x)) ? '-' : nfQ.format(+x);
   const fmtDate = ms => {
-    if (!ms) return '-';
-    try {
-      const d = new Date(ms);
-      return d.toLocaleString('tr-TR', {
-        year:'2-digit', month:'2-digit', day:'2-digit',
-        hour:'2-digit', minute:'2-digit', second:'2-digit'
-      });
-    } catch { return '-'; }
+    if(!ms) return '-';
+    const d = new Date(ms);
+    return d.toLocaleString('tr-TR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
   };
+  const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
 
-  function clsPnl(v){ return (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg'; }
+  // ---------- header badges ----------
+  async function loadHealth(){
+    try{
+      const r = await fetch('/healthz',{cache:'no-store'}); const j = await r.json();
+      document.getElementById('symbolsBadge').textContent = (j.symbols||[]).join(', ');
+      document.getElementById('streamBadge').textContent = j.stream || '';
+    }catch{}
+  }
+  setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString('tr-TR');},1000);
 
+  // ---------- positions ----------
   async function loadPositions(){
-    const res = await fetch('/paper/positions', {cache: 'no-store'});
-    const data = await res.json();
     const body = document.getElementById('posBody');
-    body.innerHTML = '';
+    try{
+      const res = await fetch('/paper/positions',{cache:'no-store'}); const data = await res.json();
+      const open = (data && data.open) ? data.open : {};
+      body.innerHTML = '';
+      const keys = Object.keys(open);
+      if(keys.length===0){ body.innerHTML = `<tr><td class="muted" colspan="15">Açık pozisyon yok.</td></tr>`; return; }
 
-    const open = (data && data.open) ? data.open : {};
+      for(const sym of keys){
+        const p = open[sym]||{};
+        const sideCls = p.side==='long' ? 'side-long':'side-short';
 
-    const keys = Object.keys(open);
-    if (keys.length === 0){
-      body.innerHTML = `<tr><td class="muted" colspan="15">Açık pozisyon yok.</td></tr>`;
-      return;
-    }
+        const entryUsd = (p.notional_usd!=null) ? p.notional_usd : (p.qty&&p.entry ? p.qty*p.entry : null);
+        const tpUsd = (p.tp&&p.qty) ? ((p.side==='long'?(p.tp-p.entry):(p.entry-p.tp))*p.qty + entryUsd) : null;
+        const slUsd = (p.stop&&p.qty) ? ((p.side==='long'?(p.stop-p.entry):(p.entry-p.stop))*p.qty + entryUsd) : null;
 
-    for (const sym of keys){
-      const p = open[sym] || {};
-      const sideCls = p.side === 'long' ? 'side-long' : 'side-short';
-
-      // USD karşılıkları
-      const entryUsd = (p.notional_usd != null) ? p.notional_usd : (p.qty && p.entry ? p.qty * p.entry : null);
-      const tpUsd    = (p.tp && p.qty) ? (p.side === 'long' ? (p.tp - p.entry) : (p.entry - p.tp)) * p.qty + entryUsd : null;
-      const slUsd    = (p.sl && p.qty) ? (p.side === 'long' ? (p.sl - p.entry) : (p.entry - p.sl)) * p.qty + entryUsd : null;
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="pair">${sym}</td>
-        <td class="${sideCls}">${p.side || '-'}</td>
-        <td class="num">${fmtQty(p.qty)}</td>
-        <td class="num">${fmt4(p.entry)}</td>
-        <td class="num">${fmt4(p.tp)}</td>
-        <td class="num">${fmt4(p.stop)}</td>
-        <td class="num">${fmt2(entryUsd)}</td>
-        <td class="num">${fmt2(tpUsd)}</td>
-        <td class="num">${fmt2(slUsd)}</td>
-        <td class="num ${clsPnl(p.pnl)}">${fmt2(p.pnl)}</td>
-        <td class="num">${p.leverage ?? 1}</td>
-        <td class="num">${fmt2(p.margin_usd)}</td>
-        <td class="num">${fmt2(p.notional_usd)}</td>
-        <td class="num">${fmt4(p.liq_price)}</td>
-        <td class="num">${fmtDate(p.open_ts)}</td>
-      `;
-      body.appendChild(tr);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${sym}</td>
+          <td class="${sideCls}">${p.side||'-'}</td>
+          <td class="num">${fmtQ(p.qty)}</td>
+          <td class="num">${fmt4(p.entry)}</td>
+          <td class="num">${fmt4(p.tp)}</td>
+          <td class="num">${fmt4(p.stop)}</td>
+          <td class="num">${fmt2(entryUsd)}</td>
+          <td class="num">${fmt2(tpUsd)}</td>
+          <td class="num">${fmt2(slUsd)}</td>
+          <td class="num ${clsP(p.pnl)}">${fmt2(p.pnl)}</td>
+          <td class="num">${p.leverage ?? 1}</td>
+          <td class="num">${fmt2(p.margin_usd)}</td>
+          <td class="num">${fmt2(p.notional_usd)}</td>
+          <td class="num">${fmt4(p.liq_price)}</td>
+          <td class="num">${fmtDate(p.open_ts)}</td>
+        `;
+        body.appendChild(tr);
+      }
+    }catch(e){
+      body.innerHTML = `<tr><td class="muted" colspan="15">Yüklenemedi.</td></tr>`;
     }
   }
 
-  // ilk yükleme ve periyodik güncelleme
-  loadPositions();
+  // ---------- signals ----------
+  async function loadSignals(){
+    try{
+      const r = await fetch('/signals',{cache:'no-store'}); const j = await r.json();
+      document.getElementById('signalsBox').textContent = JSON.stringify(j,null,2);
+    }catch{ document.getElementById('signalsBox').textContent = 'Yüklenemedi.'; }
+  }
+
+  // ---------- history ----------
+  async function loadHistory(){
+    const body = document.getElementById('histBody');
+    try{
+      const r = await fetch('/history?limit=100',{cache:'no-store'}); const j = await r.json();
+      const rows = (j && j.ok && Array.isArray(j.rows)) ? j.rows : [];
+      body.innerHTML = '';
+      if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`; return; }
+      for(const x of rows){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${x.symbol}</td>
+          <td>${x.side}</td>
+          <td class="num">${fmtQ(x.qty)}</td>
+          <td class="num">${fmt4(x.entry)}</td>
+          <td class="num">${fmt4(x.exit)}</td>
+          <td class="num ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
+          <td class="num">${x.leverage ?? '-'}</td>
+          <td class="num">${fmt2(x.margin_usd)}</td>
+          <td class="num">${fmt2(x.notional_usd)}</td>
+          <td class="num">${fmt4(x.liq_price)}</td>
+          <td class="num">${x.opened_at || '-'}</td>
+          <td class="num">${x.closed_at || '-'}</td>
+        `;
+        body.appendChild(tr);
+      }
+    }catch(e){
+      body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
+    }
+  }
+
+  // ---------- kick ----------
+  loadHealth();
+  loadPositions(); loadSignals(); loadHistory();
   setInterval(loadPositions, 2000);
+  setInterval(loadSignals, 4000);
+  setInterval(loadHistory, 10000);
 </script>
 </body>
 </html>
