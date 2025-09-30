@@ -8,6 +8,7 @@ from .config import settings
 
 _pool: asyncpg.pool.Pool | None = None
 
+# ---- Ana tablo şeması (CREATE IF NOT EXISTS) ----
 DDL = """
 CREATE TABLE IF NOT EXISTS trades (
     id BIGSERIAL PRIMARY KEY,
@@ -17,43 +18,38 @@ CREATE TABLE IF NOT EXISTS trades (
     entry DOUBLE PRECISION NOT NULL,
     exit DOUBLE PRECISION,
     pnl DOUBLE PRECISION NOT NULL,
-    leverage INT,
-    margin_usd DOUBLE PRECISION,
-    notional_usd DOUBLE PRECISION,
-    liq_price DOUBLE PRECISION,
-    open_ts BIGINT,
-    close_ts BIGINT,
-    raw JSONB,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
-
-MIGRATIONS = [
-    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS leverage INT",
-    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS margin_usd DOUBLE PRECISION",
-    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS notional_usd DOUBLE PRECISION",
-    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS liq_price DOUBLE PRECISION",
-    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS open_ts BIGINT",
-    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_ts BIGINT",
-    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS raw JSONB",
-]
 """
 
+# ---- Sonradan eklenen kolonları idempotent şekilde ekle ----
+MIGRATIONS = [
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS leverage INT;",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS margin_usd DOUBLE PRECISION;",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS notional_usd DOUBLE PRECISION;",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS liq_price DOUBLE PRECISION;",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS open_ts BIGINT;",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_ts BIGINT;",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS raw JSONB;",
+]
+
 async def init_pool():
+    """DB pool + DDL + idempotent migration."""
     global _pool
     if not settings.DATABASE_URL:
         return
     _pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=5)
     async with _pool.acquire() as conn:
-        # tablo yoksa oluştur
+        # Tablo yoksa oluştur
         await conn.execute(DDL)
-        # eksik kolonları ekle (idempotent)
+        # Eksik kolonları ekle
         for sql in MIGRATIONS:
             try:
                 await conn.execute(sql)
             except Exception:
-                # eşzamanlı deploy vb. durumlarda hata görmezden gelebiliriz
+                # eşzamanlı deploy vs. durumlarda safe-ignore
                 pass
 
 async def ping() -> bool:
@@ -65,13 +61,17 @@ async def ping() -> bool:
         await init_pool()
     try:
         async with _pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
+            await conn.fetchval("SELECT 1;")
         return True
     except Exception:
         return False
 
 async def insert_trade(rec: dict):
-    """PaperBroker.close sonrası snapshot'ı kaydet."""
+    """
+    rec: PaperBroker.close sonrası gelen snapshot
+    Beklenen alanlar: symbol, side, qty, entry, exit, pnl, leverage, margin_usd,
+                      notional_usd, liq_price, open_ts, close_ts
+    """
     if not settings.DATABASE_URL:
         return
     global _pool
@@ -86,7 +86,7 @@ async def insert_trade(rec: dict):
                 open_ts, close_ts, raw
             ) VALUES (
                 $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
-            )
+            );
             """,
             rec.get("symbol"),
             rec.get("side"),
@@ -126,13 +126,12 @@ async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
                    open_ts, close_ts, created_at
             FROM trades
             ORDER BY id DESC
-            LIMIT $1
+            LIMIT $1;
             """,
             int(limit),
         )
     out: List[dict[str, Any]] = []
     for r in rows:
-        # created_at datetime olabilir → isoformat'a çevir
         created_at_iso = r["created_at"].isoformat() if r["created_at"] else None
         out.append({
             "symbol": r["symbol"],
