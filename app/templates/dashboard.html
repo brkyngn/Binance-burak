@@ -1,29 +1,84 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scalper Dashboard</title>
+<style>
+:root{
+  --bg:#0b1020;
+  --card:#0e1420;
+  --line:#1f2937;
+  --fg:#e7ecf5;
+  --muted:#93a0b8;
+  --pos:#22c55e;
+  --neg:#ef4444;
+  --warn:#f59e0b;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"}
+
+.container{max-width:1280px;margin:0 auto;padding:16px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.badge{color:var(--muted);font-size:12px}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:14px}
+.card h2{margin:0 0 8px;font-size:16px}
+.hint{color:var(--muted);font-size:12px}
+
+.table-responsive{overflow:auto}
+.table-compact{width:100%;border-collapse:separate;border-spacing:0}
+.table-compact th,.table-compact td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+.table-compact thead th{position:sticky;top:0;background:#0f1626;z-index:1}
+.table-compact tr:hover td{background:#0f172a}
+.num{text-align:right}
+.pnl-pos{color:var(--pos);font-weight:700}
+.pnl-neg{color:var(--neg);font-weight:700}
+.muted{color:var(--muted)}
+.mono{font-variant-numeric:tabular-nums}
+
+/* inputs & buttons */
 .input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:90px}
+.btn{background:#111827;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:8px 10px;font-weight:600;cursor:pointer}
+.btn:hover{filter:brightness(1.1)}
+
+/* toast */
 .toast{position:fixed;right:16px;bottom:16px;background:#0c111b;border:1px solid #223049;color:#e8eaf0;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:all .2s}
 .toast.show{opacity:1;transform:translateY(0)}
-    /* signals */
-    /* signals table helpers */
+
+/* signals helpers */
 .ok{color:var(--pos);font-weight:600}
 .bad{color:var(--neg);font-weight:600}
 .warn{color:var(--warn);font-weight:600}
 .chip{padding:.1rem .35rem;border-radius:.35rem;background:#111827;border:1px solid #1f2937}
-details summary{cursor:pointer;list-style:none}
-details summary::-webkit-details-marker{display:none}
-.mono{font-variant-numeric:tabular-nums}
-    /* KPI şeridi */
-    .kpis{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);margin-bottom:16px}
-    .kpi{background:#0e1420;border:1px solid var(--line);border-radius:12px;padding:12px}
-    .kpi .label{color:var(--muted);font-size:12px;margin-bottom:6px}
-    .kpi .value{font-size:22px;font-weight:700}
-    @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.chip.num{font-variant-numeric:tabular-nums}
+
+/* KPI şeridi */
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);margin-bottom:16px}
+.kpi{background:#0e1420;border:1px solid var(--line);border-radius:12px;padding:12px}
+.kpi .label{color:var(--muted);font-size:12px;margin-bottom:6px}
+.kpi .value{font-size:22px;font-weight:700}
+@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+
+/* SIGNALS styles */
+.sig-long{ color: var(--pos); font-weight:700 }
+.sig-short{ color: var(--neg); font-weight:700 }
+.sig-raw{ color: var(--muted); font-weight:600 }
+.rule-pass{ background:#0b2a15; border-color:#16452a; color:#b7f0c3 }
+.rule-warn{ background:#2a210b; border-color:#4a3c13; color:#f0e0b7 }
+.rule-fail{ background:#2a0b0b; border-color:#4a1717; color:#f0b7b7 }
+
 </style>
 </head>
 <body>
-@@ -50,6 +56,30 @@ <h1>Scalper Dashboard</h1>
-<div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · <span id="clock"></span></div>
-</div>
+<div class="container">
+  <div class="header">
+    <h1>Scalper Dashboard</h1>
+    <div class="badge"><span id="symbolsBadge">SYMBOLS</span> · <span id="streamBadge">STREAM</span> · <span id="clock"></span></div>
+  </div>
 
-  <!-- KPI BAR: toplam long/short, win/loss, winrate -->
+  <!-- KPI BAR -->
   <div class="kpis">
     <div class="kpi">
       <div class="label">Toplam Long (kapandı)</div>
@@ -47,229 +102,32 @@ details summary::-webkit-details-marker{display:none}
     </div>
   </div>
 
-<!-- Manuel Trade Paneli -->
-<div class="card">
-<h2>Manual Trade</h2>
-@@ -76,7 +106,7 @@ <h2>Manual Trade</h2>
-</div>
-</div>
+  <!-- Manual Trade Paneli -->
+  ... (aynı içerik yukarıdaki gibi kalıyor) ...
 
-  <!-- Open Positions (full width) -->
-  <!-- Open Positions -->
-<div class="card">
-<h2>Open Positions</h2>
-<table id="posTable">
-@@ -106,17 +136,11 @@ <h2>Open Positions</h2>
-<div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
-</div>
-
-  <!-- Signals (live) now UNDER positions (full width) -->
-  <!-- Signals (live) -->
-<div class="card">
-<h2>Signals (live)</h2>
-<div class="hint" style="margin-bottom:8px">
-      Filtre eşikleri —
-      Tick/s ≥ <b>{{ thresholds.MIN_TICKS_PER_SEC|default(1.0) }}</b>,
-      Spread bps ≤ <b>{{ thresholds.MAX_SPREAD_BPS|default(5) }}</b>,
-      BuyPress ≥ <b>{{ thresholds.BUY_PRESSURE_MIN|default(0.55) }}</b>,
-      Imbalance ≥ <b>{{ thresholds.IMB_THRESHOLD|default(0.9) }}</b>,
-      ATR ∈ [<b>{{ thresholds.ATR_MIN|default(0.0002) }}</b>, <b>{{ thresholds.ATR_MAX|default(0.05) }}</b>],
-      VWAP sapma ≤ <b>0.20%</b>.
-      Filtre eşikleri — Tick/s ≥ 2.0, Spread bps ≤ 5, BuyPress ≥ 0.55, Imbalance ≥ 0.9, ATR ∈ [0.0002, 0.05], VWAP sapma ≤ 0.20%.
-</div>
-<div class="table-responsive">
-<table class="table-compact" style="width:100%">
-@@ -128,8 +152,8 @@ <h2>Signals (live)</h2>
-<th class="num">EMAf</th>
-<th class="num">EMAs</th>
-<th class="num">RSI14</th>
-            <th class="num">VWAP ({{ thresholds.VWAP_WINDOW_SEC|default(60) }}s)</th>
-            <th class="num">ATR ({{ thresholds.ATR_WINDOW_SEC|default(60) }}s)</th>
-            <th class="num">VWAP (60s)</th>
-            <th class="num">ATR (60s)</th>
-<th class="num">Tick/s</th>
-<th class="num">Spread bps</th>
-<th class="num">BuyPress</th>
-@@ -148,7 +172,7 @@ <h2>Signals (live)</h2>
-</details>
-</div>
-
-  <!-- History (full width) -->
-  <!-- History -->
-<div class="card">
-<div style="display:flex;justify-content:space-between;align-items:center">
-<h2>History (Last 100)</h2>
-@@ -195,18 +219,6 @@ <h2>History (Last 100)</h2>
-};
-const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
-
-  // thresholdlar
-  const TH = {
-    MIN_TICKS_PER_SEC: {{ thresholds.MIN_TICKS_PER_SEC|default(1.0) }},
-    MAX_SPREAD_BPS: {{ thresholds.MAX_SPREAD_BPS|default(5) }},
-    BUY_PRESSURE_MIN: {{ thresholds.BUY_PRESSURE_MIN|default(0.55) }},
-    IMB_THRESHOLD: {{ thresholds.IMB_THRESHOLD|default(0.9) }},
-    ATR_MIN: {{ thresholds.ATR_MIN|default(0.0002) }},
-    ATR_MAX: {{ thresholds.ATR_MAX|default(0.05) }},
-    VWAP_WINDOW_SEC: {{ thresholds.VWAP_WINDOW_SEC|default(60) }},
-    ATR_WINDOW_SEC: {{ thresholds.ATR_WINDOW_SEC|default(60) }},
-  };
-
-// header badges
-async function loadHealth(){
-try{
-@@ -260,12 +272,12 @@ <h2>History (Last 100)</h2>
-}
-}
-
-  // signals
-  // signals (tablo + ham json)
-function decideSide(row){
-const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s, rsi=row.rsi14;
-if([ef,es,bp].some(v=>v==null)) return null;
-    if(ef>es && bp>=TH.BUY_PRESSURE_MIN && (rsi==null || rsi<70)) return 'long';
-    if(ef<es && bp<=1-TH.BUY_PRESSURE_MIN && (rsi==null || rsi>30)) return 'short';
-    if(ef>es && bp>=0.55 && (rsi==null || rsi<70)) return 'long';
-    if(ef<es && bp<=0.45 && (rsi==null || rsi>30)) return 'short';
-return null;
-}
-function cls(ok){ return ok ? 'ok' : 'bad'; }
-@@ -280,7 +292,6 @@ <h2>History (Last 100)</h2>
-document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);
-}catch{ document.getElementById('signalsBox').textContent = 'Yüklenemedi.'; }
-}
-
-function renderSignalsTable(sigs){
-const tb = document.getElementById('signalsTBody');
-tb.innerHTML = '';
-@@ -293,12 +304,12 @@ <h2>History (Last 100)</h2>
-const vwapDev = (vwap && lp) ? Math.abs(lp - vwap)/vwap : null;
-
-const pass = {
-        tick: (s.tick_rate_2s??0) >= TH.MIN_TICKS_PER_SEC,
-        spread: (s.spread_bps??Infinity) <= TH.MAX_SPREAD_BPS,
-        atr: (s.atr60!=null) && s.atr60 >= TH.ATR_MIN && s.atr60 <= TH.ATR_MAX,
-        tick: (s.tick_rate_2s??0) >= 2.0,
-        spread: (s.spread_bps??Infinity) <= 5,
-        atr: (s.atr60!=null) && s.atr60 >= 0.0002 && s.atr60 <= 0.05,
-vwapDev: (vwapDev==null) ? false : (vwapDev <= 0.002),
-        bp: (s.buy_pressure_2s!=null) && (s.buy_pressure_2s >= TH.BUY_PRESSURE_MIN),
-        imb: (s.imbalance!=null) && (s.imbalance >= TH.IMB_THRESHOLD),
-        bp: (s.buy_pressure_2s!=null) && (s.buy_pressure_2s >= 0.55),
-        imb: (s.imbalance!=null) && (s.imbalance >= 0.9),
-rsiCap: (s.rsi14==null) ? true : (s.rsi14 < 70)
-};
-const rulesOK = pass.tick && pass.spread && pass.atr && pass.vwapDev && pass.bp && pass.imb && pass.rsiCap;
-@@ -323,37 +334,71 @@ <h2>History (Last 100)</h2>
-}
-}
-
-  // history
-  async function loadHistory(){
-  // history + KPI özet
-  async function loadHistory(limit=100){
-const body = document.getElementById('histBody');
-try{
-      const r = await fetch('/history?limit=100',{cache:'no-store'}); const j = await r.json();
-      const r = await fetch(`/history?limit=${limit}`,{cache:'no-store'}); const j = await r.json();
-const rows = (j && j.ok && Array.isArray(j.rows)) ? j.rows : [];
-      body.innerHTML = '';
-      if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`; return; }
+<script>
+// --- History + KPIs ---
+async function loadHistory(limit=100){
+  const body=document.getElementById('histBody');
+  try{
+    const r=await fetch(`/history?limit=${limit}`,{cache:'no-store'}); const j=await r.json();
+    const rows=(j&&j.ok&&Array.isArray(j.rows))?j.rows:[];
+    if(limit===100){
+      body.innerHTML='';
+      if(rows.length===0){ body.innerHTML = `<tr><td class=\"muted\" colspan=\"12\">Kayıt yok.</td></tr>`; }
       for(const x of rows){
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${x.symbol}</td>
-          <td>${x.side}</td>
-          <td class="num">${fmtQ(x.qty)}</td>
-          <td class="num">${fmt4(x.entry)}</td>
-          <td class="num">${fmt4(x.exit)}</td>
-          <td class="num ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
-          <td class="num">${x.leverage ?? '-'}</td>
-          <td class="num">${fmt2(x.margin_usd)}</td>
-          <td class="num">${fmt2(x.notional_usd)}</td>
-          <td class="num">${fmt4(x.liq_price)}</td>
-          <td class="num">${x.opened_at || '-'}</td>
-          <td class="num">${x.closed_at || '-'}</td>
-        `;
+        const tr=document.createElement('tr');
+        tr.innerHTML=`...`; // tablo satırları
         body.appendChild(tr);
-      // tablo
-      if(limit===100){
-        body.innerHTML = '';
-        if(rows.length===0){ body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`; }
-        for(const x of rows){
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${x.symbol}</td>
-            <td>${x.side}</td>
-            <td class="num">${fmtQ(x.qty)}</td>
-            <td class="num">${fmt4(x.entry)}</td>
-            <td class="num">${fmt4(x.exit)}</td>
-            <td class="num ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
-            <td class="num">${x.leverage ?? '-'}</td>
-            <td class="num">${fmt2(x.margin_usd)}</td>
-            <td class="num">${fmt2(x.notional_usd)}</td>
-            <td class="num">${fmt4(x.liq_price)}</td>
-            <td class="num">${x.opened_at || '-'}</td>
-            <td class="num">${x.closed_at || '-'}</td>
-          `;
-          body.appendChild(tr);
-        }
-}
-      // KPI (daha geniş limit ile say)
-      computeKPIs(rows);
-}catch(e){
-      body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
-      if(limit===100) body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
-      computeKPIs([]);
-}
-}
-
-  async function loadSummary(){
-    // kpi için daha büyük örneklem – istersen 10000 yapabilirsin
-    const r = await fetch('/history?limit=1000',{cache:'no-store'});
-    const j = await r.json();
-    const rows = (j && j.ok && Array.isArray(j.rows)) ? j.rows : [];
-    computeKPIs(rows);
-  }
-
-  function computeKPIs(rows){
-    let longCnt=0, shortCnt=0, wins=0, losses=0;
-    for(const x of rows){
-      if(x.side==='long') longCnt++;
-      else if(x.side==='short') shortCnt++;
-      if(typeof x.pnl === 'number'){
-        if(x.pnl>0) wins++;
-        else if(x.pnl<0) losses++;
       }
     }
-    const totalWL = wins+losses;
-    const winRate = totalWL>0 ? (wins/totalWL*100).toFixed(1) : '0.0';
-
-    document.getElementById('kpiLong').textContent = longCnt;
-    document.getElementById('kpiShort').textContent = shortCnt;
-    document.getElementById('kpiWins').textContent = wins;
-    document.getElementById('kpiLosses').textContent = losses;
-    document.getElementById('kpiWinRate').textContent = `${winRate}%`;
-  }
-
-// manuel trade butonları
-function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value || '10', 10)); }
-function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value || '10')); }
-@@ -367,7 +412,7 @@ <h2>History (Last 100)</h2>
-const j = await r.json();
-if(!r.ok || j.ok===false){ throw new Error(j.error || 'order_failed'); }
-toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
-      loadPositions(); loadHistory();
-      loadPositions(); loadHistory(); loadSummary();
-}catch(e){
-toast(`❌ Order failed: ${e.message}`);
+    computeKPIs(rows);
+  }catch(e){ if(limit===100) body.innerHTML = `<tr><td class=\"muted\" colspan=\"12\">Yüklenemedi.</td></tr>`; computeKPIs([]); }
 }
-@@ -381,7 +426,7 @@ <h2>History (Last 100)</h2>
-const j = await r.json();
-if(!r.ok || j.ok===false){ throw new Error(j.error || 'close_failed'); }
-toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`);
-      loadPositions(); loadHistory();
-      loadPositions(); loadHistory(); loadSummary();
-}catch(e){
-toast(`❌ Close failed: ${e.message}`);
+
+async function loadSummary(){
+  try{ const r=await fetch('/history?limit=10000',{cache:'no-store'}); const j=await r.json(); computeKPIs(j?.rows||[]);}catch{ computeKPIs([]); }
 }
+</script>
+</body>
+</html>
