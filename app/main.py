@@ -9,6 +9,7 @@ from .config import settings
 from .logger import logger
 from .db import init_pool, fetch_recent
 
+
 # -----------------------------
 # FastAPI app & templates
 # -----------------------------
@@ -143,4 +144,17 @@ async def history(limit: int = 50):
 # -----------------------------
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    thresholds = {
+        "MIN_TICKS_PER_SEC": settings.MIN_TICKS_PER_SEC,
+        "MAX_SPREAD_BPS": settings.MAX_SPREAD_BPS,
+        "BUY_PRESSURE_MIN": settings.BUY_PRESSURE_MIN,
+        "IMB_THRESHOLD": settings.IMB_THRESHOLD,
+        "ATR_MIN": settings.ATR_MIN,
+        "ATR_MAX": settings.ATR_MAX,
+        "VWAP_WINDOW_SEC": settings.VWAP_WINDOW_SEC,
+        "ATR_WINDOW_SEC": settings.ATR_WINDOW_SEC,
+    }
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {"request": request, "thresholds": thresholds}
+    )
