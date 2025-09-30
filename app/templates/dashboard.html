@@ -146,7 +146,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
     <h2>Debug</h2>
     <div class="hint">Endpoint ham cevapları ve son hatalar</div>
     <details open style="margin-top:8px">
-      <summary>/health</summary>
+      <summary>/healthz</summary>
       <pre id="dbgHealth" class="code">—</pre>
     </details>
     <details style="margin-top:8px">
@@ -280,7 +280,7 @@ function normalizeSignal(s){
   const bp  = Number(pick(s,'buy_pressure_2s','buy_pressure','bp'));
   const imb = Number(pick(s,'imbalance','imb'));
   const symbol = pick(s,'symbol');
-  const ts = pick(s,'ts','time','timestamp');
+  const ts = pick(s,'ts','time','timestamp','last_ts');
   return { ts, symbol, last_price:lp, vwap60:vwap, ema_fast:emaf, ema_slow:emas, rsi14:rsi, atr60:atr, tick_rate_2s:tps, spread_bps:spr, buy_pressure_2s:bp, imbalance:imb };
 }
 
@@ -303,7 +303,9 @@ function decideSide(row){
 // --------- LOADERS ----------
 async function loadHealth(){
   try{
-    const r=await fetch('/health',{cache:'no-store'});
+    // önce /healthz, sonra /health
+    let r = await fetch('/healthz',{cache:'no-store'});
+    if (!r.ok) r = await fetch('/health',{cache:'no-store'});
     if (!r.ok) throw new Error('404');
     const j=await r.json();
     document.getElementById('dbgHealth').textContent = JSON.stringify(j,null,2);
@@ -314,7 +316,6 @@ async function loadHealth(){
     }
     document.getElementById('streamBadge').textContent = j?.stream || '—';
   }catch{
-    // health yoksa, sembolleri signals sırasında dolduracağız
     document.getElementById('dbgHealth').textContent = JSON.stringify({detail:"Not Found"}, null, 2);
     document.getElementById('streamBadge').textContent = '—';
   }
@@ -416,22 +417,26 @@ async function loadPositions(){
   }
 
   try{
-    // Olası yollar
-    const candidates = ['/positions','/open_positions','/account/positions'];
-    let j = null;
+    // Önce /paper/positions (senin backend), olmazsa diğerleri
+    const candidates = ['/paper/positions','/positions','/open_positions','/account/positions'];
+    let j = null, used = '';
     for(const path of candidates){
       j = await tryFetch(path);
-      if (j) { break; }
+      if (j) { used = path; break; }
     }
 
     if (!j){
       document.getElementById('dbgPositions').textContent = JSON.stringify({detail:"Not Found"}, null, 2);
-      body.innerHTML = `<tr><td class="muted" colspan="10">Endpoint bulunamadı (/positions, /open_positions, /account/positions). Backend’te en az birini aç.</td></tr>`;
+      body.innerHTML = `<tr><td class="muted" colspan="10">Endpoint bulunamadı (/paper/positions, /positions, /open_positions, /account/positions).</td></tr>`;
       return;
     }
 
     document.getElementById('dbgPositions').textContent = JSON.stringify(j,null,2);
-    const raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','positions','openPositions','items']);
+
+    // JSON array mi? değilse dizi çıkar veya {SYMBOL:{...}} map'ini çevir
+    let raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','positions','openPositions','items']);
+    if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
+
     const rows = Array.isArray(raw) ? raw.map(normalizePosition) : [];
 
     body.innerHTML='';
@@ -542,7 +547,7 @@ async function manualOpen(side){
   const symbol=getSymbol();
   const payload={symbol, side, leverage:getLev(), margin_usd:getMargin()};
   try{
-    const r=await fetch('/order/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await fetch('/paper/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const j=await r.json();
     if(!r.ok || j.ok===false) throw new Error(j.error||'order_failed');
     toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
@@ -552,7 +557,7 @@ async function manualOpen(side){
 async function manualClose(){ await closeSymbol(getSymbol()); }
 async function closeSymbol(symbol){
   try{
-    const r=await fetch('/order/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
+    const r=await fetch('/paper/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
     const j=await r.json();
     if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed');
     toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`);
