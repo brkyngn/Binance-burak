@@ -1,65 +1,71 @@
-from pydantic import BaseSettings
+# app/config.py
+# Pydantic v2 ile BaseSettings -> pydantic_settings paketine taşındı.
+# Aşağıdaki import bloğu hem v2 (tercihen) hem v1 ile geri uyumludur.
+try:
+    from pydantic_settings import BaseSettings
+except Exception:  # pydantic v1 fallback (eski ortamlar)
+    from pydantic import BaseSettings  # type: ignore
+
+from typing import List
 import os
 
-def _get_float(name: str, default: float) -> float:
-    try:
-        return float(os.getenv(name, default))
-    except Exception:
-        return default
 
-def _get_int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, default))
-    except Exception:
-        return default
+def _csv_env(name: str, default: str = "") -> List[str]:
+    raw = os.getenv(name, default)
+    if not raw:
+        return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
 
 
-class Settings:
-    # Genel
-    PORT: int = _get_int("PORT", 8080)
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")   # <<< GEREKLİ
-
-    # Semboller ve akışlar
-    SYMBOLS: list[str] = [s.strip() for s in os.getenv("SYMBOLS", "BTCUSDT,ETHUSDT").split(",") if s.strip()]
-    STREAM: str = os.getenv("STREAM", "aggTrade")
+class Settings(BaseSettings):
+    # --- Binance WS ---
     WS_URL: str = os.getenv("WS_URL", "wss://stream.binance.com:9443/stream")
+    STREAM: str = os.getenv("STREAM", "aggTrade")          # trades: "aggTrade"
+    ENABLE_DEPTH: bool = os.getenv("ENABLE_DEPTH", "true").lower() == "true"
+    DEPTH_STREAM: str = os.getenv("DEPTH_STREAM", "bookTicker")  # depth top: "bookTicker"
 
-    # Depth/bookTicker
-    ENABLE_DEPTH: bool = os.getenv("ENABLE_DEPTH", "true").lower() in ("1", "true", "yes")
-    DEPTH_STREAM: str = os.getenv("DEPTH_STREAM", "bookTicker")  # 'bookTicker' önerilir
+    # Symbols (CSV: "BTCUSDT,ETHUSDT")
+    SYMBOLS: List[str] = _csv_env("SYMBOLS", "BTCUSDT,ETHUSDT")
 
-    # Opsiyonel n8n webhook
+    # Reconnect/backoff
+    BACKOFF_BASE: float = float(os.getenv("BACKOFF_BASE", "2.0"))
+
+    # Logging
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    # N8n webhook (opsiyonel)
     N8N_WEBHOOK_URL: str | None = os.getenv("N8N_WEBHOOK_URL")
 
-    # Reconnect backoff
-    BACKOFF_BASE: float = _get_float("BACKOFF_BASE", 1.0)
-    BACKOFF_MAX: float = _get_float("BACKOFF_MAX", 30.0)
+    # Paper broker
+    MAX_POSITIONS: int = int(os.getenv("MAX_POSITIONS", "10"))
 
-    # Pencere & eşikler
-    VWAP_WINDOW_SEC: int = _get_int("VWAP_WINDOW_SEC", 60)
-    ATR_WINDOW_SEC: int = _get_int("ATR_WINDOW_SEC", 60)
-    MIN_TICKS_PER_SEC: float = _get_float("MIN_TICKS_PER_SEC", 2.0)
+    # Otomatik TP/SL yüzdesi (ör. 0.03 = %3)
+    AUTO_TP_PCT: float = float(os.getenv("AUTO_TP_PCT", "0.03"))
+    AUTO_SL_PCT: float = float(os.getenv("AUTO_SL_PCT", "0.03"))
 
-    ATR_MIN: float = _get_float("ATR_MIN", 0.0008)   # %0.08
-    ATR_MAX: float = _get_float("ATR_MAX", 0.0040)   # %0.40
+    # Sinyal filtreleri (scalping)
+    VWAP_WINDOW_SEC: int = int(os.getenv("VWAP_WINDOW_SEC", "60"))
+    ATR_WINDOW_SEC: int = int(os.getenv("ATR_WINDOW_SEC", "60"))
+    MIN_TICKS_PER_SEC: float = float(os.getenv("MIN_TICKS_PER_SEC", "1.0"))
+    MAX_SPREAD_BPS: float = float(os.getenv("MAX_SPREAD_BPS", "5"))  # bps
+    ATR_MIN: float = float(os.getenv("ATR_MIN", "0.0002"))
+    ATR_MAX: float = float(os.getenv("ATR_MAX", "0.05"))  # güvenlik tavanı
+    BUY_PRESSURE_MIN: float = float(os.getenv("BUY_PRESSURE_MIN", "0.55"))
+    IMB_THRESHOLD: float = float(os.getenv("IMB_THRESHOLD", "0.9"))
 
-    BUY_PRESSURE_MIN: float = _get_float("BUY_PRESSURE_MIN", 0.55)  # >= %55
-    IMB_THRESHOLD: float = _get_float("IMB_THRESHOLD", 1.25)        # bid/ask vol oranı
-    MAX_SPREAD_BPS: float = _get_float("MAX_SPREAD_BPS", 2.0)       # 2 bps = %0.02
+    # Leverage / Margin (yeni)
+    LEVERAGE: int = int(os.getenv("LEVERAGE", "10"))                # 10x
+    MARGIN_PER_TRADE: float = float(os.getenv("MARGIN_PER_TRADE", "10"))  # $10 marj
+    MAINT_MARGIN_RATE: float = float(os.getenv("MAINT_MARGIN_RATE", "0.004"))  # ~0.4%
+    FEE_RATE: float = float(os.getenv("FEE_RATE", "0.0004"))        # 4 bps varsayılan
 
-    # Risk / otomatik işlem
-    AUTO_TP_PCT: float = _get_float("AUTO_TP_PCT", 0.003)   # +%0.30
-    AUTO_SL_PCT: float = _get_float("AUTO_SL_PCT", 0.003)   # -%0.30
-    SIGNAL_COOLDOWN_MS: int = _get_int("SIGNAL_COOLDOWN_MS", 2000)
-    MAX_POSITIONS: int = _get_int("MAX_POSITIONS", 3)
-
-    # PostgreSQL
+    # DB
     DATABASE_URL: str | None = os.getenv("DATABASE_URL")
 
-    LEVERAGE: int = int(os.getenv("LEVERAGE", "10"))              # 10x
-    MARGIN_PER_TRADE: float = float(os.getenv("MARGIN_PER_TRADE", "10"))  # 10$ marj
-    MAINT_MARGIN_RATE: float = float(os.getenv("MAINT_MARGIN_RATE", "0.004"))  # 0.4% (yaklaşık)
-    FEE_RATE: float = float(os.getenv("FEE_RATE", "0.0004"))      # 4 bps varsayılan
+    class Config:
+        # pydantic v1 uyumu için (v2'de etkisiz)
+        case_sensitive = False
 
 
+# Tekil settings objesi
 settings = Settings()
