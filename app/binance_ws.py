@@ -194,7 +194,7 @@ class BinanceWSClient:
         - Açık pozisyon var ve gelen 'decision' pozisyonun tersiyse,
           flip için **aynı yönde art arda 2 sinyal** beklenir.
         - 2. sinyal geldiğinde: mevcut pozisyon kapanır, ters yöne yeni pozisyon açılır.
-        - Kârda/zararda olma durumu fark etmez; her iki durumda da 2 sinyal gerekir (senin isteğine göre).
+        - Kârda/zararda olma durumu fark etmez; her iki durumda da 2 sinyal gerekir.
         """
         pos = self.paper.positions.get(sym)
         if not pos or decision is None:
