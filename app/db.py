@@ -35,6 +35,7 @@ MIGRATIONS = [
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS raw JSONB;",
 ]
 
+
 async def init_pool():
     """DB pool + DDL + idempotent migration."""
     global _pool
@@ -52,6 +53,7 @@ async def init_pool():
                 # eşzamanlı deploy vs. durumlarda safe-ignore
                 pass
 
+
 async def ping() -> bool:
     """Basit bağlantı testi."""
     if not settings.DATABASE_URL:
@@ -65,6 +67,7 @@ async def ping() -> bool:
         return True
     except Exception:
         return False
+
 
 async def insert_trade(rec: dict):
     """
@@ -103,13 +106,20 @@ async def insert_trade(rec: dict):
             json.dumps(rec),
         )
 
-def _ms_to_iso(ms: int | None) -> str | None:
+
+def _fmt_ts_ms(ms: int | None) -> str | None:
+    """
+    ms (epoch millis) -> 'dd-mm-YYYY HH:MM:SS' (UTC)
+    Dashboard için daha okunur format.
+    """
     if not ms:
         return None
     try:
-        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+        dt = datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+        return dt.strftime("%d-%m-%Y %H:%M:%S")
     except Exception:
         return None
+
 
 async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
     """Son işlemler (JSON-serializable)."""
@@ -132,7 +142,7 @@ async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
         )
     out: List[dict[str, Any]] = []
     for r in rows:
-        created_at_iso = r["created_at"].isoformat() if r["created_at"] else None
+        created_at_str = r["created_at"].strftime("%d-%m-%Y %H:%M:%S") if r["created_at"] else None
         out.append({
             "symbol": r["symbol"],
             "side": r["side"],
@@ -146,8 +156,8 @@ async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
             "liq_price": float(r["liq_price"]) if r["liq_price"] is not None else None,
             "open_ts": int(r["open_ts"]) if r["open_ts"] is not None else None,
             "close_ts": int(r["close_ts"]) if r["close_ts"] is not None else None,
-            "opened_at": _ms_to_iso(r["open_ts"]),
-            "closed_at": _ms_to_iso(r["close_ts"]),
-            "created_at": created_at_iso,
+            "opened_at": _fmt_ts_ms(r["open_ts"]),
+            "closed_at": _fmt_ts_ms(r["close_ts"]),
+            "created_at": created_at_str,
         })
     return out
