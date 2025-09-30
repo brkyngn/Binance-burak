@@ -148,6 +148,44 @@ async def history(limit: int = 50):
         logger.exception("history error: %s", e)
         return JSONResponse({"ok": False, "error": f"history_failed: {type(e).__name__}: {e}"}, status_code=500)
 
+@app.post("/paper/close")
+async def paper_close(symbol: str = Body(..., embed=True)):
+    snap_all = client.state.snapshot()
+    snap = snap_all.get(symbol.upper())
+
+    if not snap or snap["last_price"] is None:
+        return JSONResponse({"ok": False, "error": "No last price yet"}, status_code=400)
+
+    price = float(snap["last_price"])
+
+    # BNB fiyatı (opsiyonel)
+    bnb_px = None
+    bnb_snap = snap_all.get("BNBUSDT") or snap_all.get("BNBUSD") or snap_all.get("BNBUSDT_PERP")
+    if bnb_snap and bnb_snap.get("last_price") is not None:
+        try:
+            bnb_px = float(bnb_snap["last_price"])
+        except Exception:
+            bnb_px = None
+
+    try:
+        pos = client.paper.close(symbol.upper(), price, bnb_usd_price=bnb_px)
+        # JSON cevabına fee alanlarını da ekleyelim
+        return JSONResponse({"ok": True, "closed": {
+            "symbol": pos.symbol,
+            "pnl": pos.pnl,                      # ham
+            "exit": pos.exit_price,
+            "fee_open_usd": pos.fee_open_usd,
+            "fee_close_usd": pos.fee_close_usd,
+            "fee_total_usd": pos.fee_total_usd,
+            "fee_currency": pos.fee_currency,
+            "fee_open_bnb": pos.fee_open_bnb,
+            "fee_close_bnb": pos.fee_close_bnb,
+            "fee_total_bnb": pos.fee_total_bnb,
+            "net_pnl": pos.pnl - pos.fee_total_usd
+        }})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
 # -----------------------------
 # Dashboard Page
 # -----------------------------
