@@ -33,16 +33,16 @@ class BinanceWSClient:
         self.state = MarketState(self.symbols_u)
         self.signal_cooldown: dict[str, int] = {}  # symbol -> last_signal_ts(ms)
 
+        # Flip için arka arkaya ters sinyal sayacı
+        # ör: {"BTCUSDT": {"want": "short", "count": 1}}
+        self.flip_buffer: dict[str, dict[str, Optional[str] | int]] = {}
+
         # Pozisyon kapanınca DB'ye yaz
         self.paper = PaperBroker(
             max_positions=settings.MAX_POSITIONS,
             daily_loss_limit=None,
             on_close=lambda rec: asyncio.create_task(insert_trade(rec)),
         )
-
-        # Flip sayacı (pozisyon varken ters yöne geçmek için ardışık sinyal onayı)
-        # ör: {"BTCUSDT": {"want": "long"/"short", "count": int, "last_ts": int}}
-        self.flip_state: dict[str, dict] = {}
 
         self._running = False
 
@@ -64,10 +64,6 @@ class BinanceWSClient:
                         logger.warning("n8n forward non-200: %s %s", resp.status, txt[:200])
         except Exception as e:
             logger.exception("n8n forward error: %s", e)
-
-    def _reset_flip_state(self, sym: str):
-        if sym in self.flip_state:
-            del self.flip_state[sym]
 
     # ---------------------------------------------------
     # Sinyal koşulları (yön kararı)
@@ -121,134 +117,124 @@ class BinanceWSClient:
         return None
 
     # ---------------------------------------------------
-    # Otomatik trade (açılış + flip)
+    # Pozisyon aç/kapat yardımcıları (TP/SL mutlak $)
     # ---------------------------------------------------
-    def _maybe_auto_trade(self, sym: str):
-        side = self._decide_side(sym)
-        if side is None:
-            # sinyal yoksa flip sayacı sıfırla
-            self._reset_flip_state(sym)
-            return
-
-        st = self.state.symbols.get(sym)
-        if not st or st.last_price is None:
-            self._reset_flip_state(sym)
-            return
-
-        price = st.last_price
-        ts = st.last_ts or 0
-
-        # ---- Pozisyon VAR: flip mantığı ----
-        if sym in self.paper.positions:
-            cur = self.paper.positions[sym]
-
-            # Aynı yön sinyali → flip sayacını sıfırla, yeni pozisyon açma
-            if cur.side == side:
-                self._reset_flip_state(sym)
-                return
-
-            # Ters yön sinyali: ardışık onay sayacı
-            if settings.FLIP_ENABLED:
-                stt = self.flip_state.get(sym, {"want": side, "count": 0, "last_ts": 0})
-                if stt.get("want") != side:
-                    stt = {"want": side, "count": 0, "last_ts": 0}
-                stt["count"] += 1
-                stt["last_ts"] = ts
-                self.flip_state[sym] = stt
-
-                need = max(1, int(settings.FLIP_CONFIRM_COUNT if hasattr(settings, "FLIP_CONFIRM_COUNT") else 2))
-                if stt["count"] < need:
-                    # Yeterli karşı sinyal birikmedi, bekle
-                    return
-
-                # Cooldown/interval korumaları (flip'te atlamak isteyebiliriz)
-                last = self.signal_cooldown.get(sym, 0)
-                cd_ms = getattr(settings, "SIGNAL_COOLDOWN_MS", 3000)
-                if (not getattr(settings, "FLIP_BYPASS_COOLDOWN", True)) and (ts - last < cd_ms):
-                    return
-                if ts - last < getattr(settings, "FLIP_MIN_INTERVAL_MS", 500):
-                    return
-
-                # 1) Mevcutı kapat
-                try:
-                    self.paper.close(sym, price)
-                    logger.info("FLIP %s: closed %s at %.6f (pnl=%.6f)", sym, cur.side, price, cur.pnl)
-                except Exception as e:
-                    logger.warning("FLIP %s: close failed: %s", sym, e)
-                    return
-
-                # 2) Ters yönü aç (mutlak $ TP/SL)
-                lev = int(getattr(settings, "AUTO_LEVERAGE", getattr(settings, "LEVERAGE", 10)))
-                margin = float(getattr(settings, "AUTO_MARGIN_USD", getattr(settings, "MARGIN_PER_TRADE", 10.0)))
-                notional = float(getattr(settings, "AUTO_NOTIONAL_USD", margin * lev))
-                qty = max(1e-8, round(notional / price, 6))
-
-                tp_d = float(getattr(settings, "AUTO_ABS_TP_USD", 50.0))
-                sl_d = float(getattr(settings, "AUTO_ABS_SL_USD", 50.0))
-                d_tp = tp_d / qty
-                d_sl = sl_d / qty
-
-                if side == "long":
-                    tp = price + d_tp
-                    sl = price - d_sl
-                else:
-                    tp = price - d_tp
-                    sl = price + d_sl
-
-                try:
-                    self.paper.open(
-                        sym, side, qty, price, sl, tp,
-                        leverage=lev, margin_usd=margin, maint_margin_rate=settings.MAINT_MARGIN_RATE
-                    )
-                    self.signal_cooldown[sym] = ts
-                    self._reset_flip_state(sym)
-                    logger.info(
-                        "FLIP %s → %s qty=%s entry=%.6f lev=%dx margin=$%.2f notional=$%.2f tp=%.6f sl=%.6f (±$%.2f)",
-                        sym, side, qty, price, lev, margin, notional, tp, sl, tp_d
-                    )
-                except Exception as e:
-                    logger.warning("FLIP %s: open failed: %s", sym, e)
-                return
-
-            # flip kapalı ise hiçbir şey yapma
-            return
-
-        # ---- Pozisyon YOK: normal otomatik açılış ----
-        self._reset_flip_state(sym)
-        last = self.signal_cooldown.get(sym, 0)
-        cd_ms = getattr(settings, "SIGNAL_COOLDOWN_MS", 3000)
-        if ts - last < cd_ms:
-            return
-
-        lev = int(getattr(settings, "AUTO_LEVERAGE", settings.LEVERAGE))
-        margin = float(getattr(settings, "AUTO_MARGIN_USD", settings.MARGIN_PER_TRADE))
+    def _calc_auto_params(self, sym: str, side: str, entry_price: float) -> dict:
+        """
+        AUTO_* configlerine göre qty, tp, sl hesapla.
+        Mutlak $ hedef: ±AUTO_ABS_TP_USD / ±AUTO_ABS_SL_USD
+        """
+        # Güvenli fallback'lar: LEVERAGE alanına hiç dokunmuyoruz
+        lev = int(getattr(settings, "AUTO_LEVERAGE", 10))
+        margin = float(getattr(settings, "AUTO_MARGIN_USD", 1000.0))
+        # notional default = margin * lev
         notional = float(getattr(settings, "AUTO_NOTIONAL_USD", margin * lev))
-        qty = max(1e-8, round(notional / price, 6))
-        if qty <= 0:
-            return
+
+        qty = max(1e-8, round(notional / entry_price, 6))
 
         tp_d = float(getattr(settings, "AUTO_ABS_TP_USD", 50.0))
         sl_d = float(getattr(settings, "AUTO_ABS_SL_USD", 50.0))
-        d_tp = tp_d / qty
-        d_sl = sl_d / qty
+        delta_tp = tp_d / qty
+        delta_sl = sl_d / qty
 
         if side == "long":
-            tp = price + d_tp
-            sl = price - d_sl
+            tp = entry_price + delta_tp
+            sl = entry_price - delta_sl
         else:
-            tp = price - d_tp
-            sl = price + d_sl
+            tp = entry_price - delta_tp
+            sl = entry_price + delta_sl
 
+        return {
+            "lev": lev,
+            "margin": margin,
+            "notional": notional,
+            "qty": qty,
+            "tp": tp,
+            "sl": sl,
+            "tp_d": tp_d,
+            "sl_d": sl_d,
+        }
+
+    def _open_auto(self, sym: str, side: str, price: float, ts: int):
+        """
+        Otomatik pozisyon aç. Cooldown, qty, tp/sl hesapları burada.
+        """
+        last = self.signal_cooldown.get(sym, 0)
+        if ts - last < int(getattr(settings, "SIGNAL_COOLDOWN_MS", 3000)):
+            return
+
+        if sym in self.paper.positions:
+            return
+
+        prm = self._calc_auto_params(sym, side, price)
         try:
             self.paper.open(
-                sym, side, qty, price, sl, tp,
-                leverage=lev, margin_usd=margin, maint_margin_rate=settings.MAINT_MARGIN_RATE
+                sym,
+                side,
+                qty=prm["qty"],
+                price=price,
+                stop=prm["sl"],
+                tp=prm["tp"],
+                leverage=prm["lev"],
+                margin_usd=prm["margin"],
+                # notional_usd parametresi PaperBroker.open tarafından desteklenmiyordu -> göndermiyoruz
+                maint_margin_rate=settings.MAINT_MARGIN_RATE,
             )
             self.signal_cooldown[sym] = ts
-            logger.info("AUTO-OPEN %s %s qty=%s entry=%.6f lev=%dx margin=$%.2f notional=$%.2f tp=%.6f sl=%.6f (±$%.2f)",
-                        sym, side, qty, price, lev, margin, notional, tp, sl, tp_d)
+            logger.info(
+                "AUTO-OPEN %s %s qty=%s entry=%.2f lev=%dx margin=$%.2f notional=$%.2f tp=%.2f sl=%.2f (±$%.2f)",
+                sym, side, prm["qty"], price, prm["lev"], prm["margin"], prm["notional"], prm["tp"], prm["sl"], prm["tp_d"]
+            )
         except Exception as e:
             logger.warning("AUTO-OPEN failed %s: %s", sym, e)
+
+    def _maybe_flip(self, sym: str, decision: Optional[str], price: float, ts: int):
+        """
+        Flip kuralı:
+        - Açık pozisyon var ve gelen 'decision' pozisyonun tersiyse,
+          flip için **aynı yönde art arda 2 sinyal** beklenir.
+        - 2. sinyal geldiğinde: mevcut pozisyon kapanır, ters yöne yeni pozisyon açılır.
+        - Kârda/zararda olma durumu fark etmez; her iki durumda da 2 sinyal gerekir (senin isteğine göre).
+        """
+        pos = self.paper.positions.get(sym)
+        if not pos or decision is None:
+            # açık pozisyon yoksa flip konusu değil
+            if decision is not None and not pos:
+                # normal açılış yolu
+                self._open_auto(sym, decision, price, ts)
+            return
+
+        opposite = "short" if pos.side == "long" else "long"
+        if decision != opposite:
+            # ters sinyal gelmiyorsa buffer sıfırla
+            self.flip_buffer.pop(sym, None)
+            return
+
+        # ters sinyal geldi → sayacı ilerlet
+        fb = self.flip_buffer.get(sym) or {"want": opposite, "count": 0}
+        if fb.get("want") != opposite:
+            fb = {"want": opposite, "count": 0}
+        fb["count"] = int(fb["count"]) + 1
+        self.flip_buffer[sym] = fb
+
+        logger.info("FLIP-CANDIDATE %s need=%s count=%s", sym, opposite, fb["count"])
+
+        # 2 kez üst üste geldiyse flip
+        if fb["count"] >= 2:
+            try:
+                # önce kapat
+                self.paper.close(sym, price)
+                logger.info("FLIP %s: closed %s @ %.4f", sym, pos.side, price)
+            except Exception as e:
+                logger.warning("Flip close failed %s: %s", sym, e)
+                # kapatamazsak flip denemeyelim
+                self.flip_buffer.pop(sym, None)
+                return
+
+            # sonra ters yöne aç
+            self._open_auto(sym, opposite, price, ts)
+            # buffer temizle
+            self.flip_buffer.pop(sym, None)
 
     # ---------------------------------------------------
     # Handlers
@@ -282,8 +268,11 @@ class BinanceWSClient:
         if ema_f is not None and ema_s is not None:
             logger.info("TICK %s p=%.8f ema_fast=%.4f ema_slow=%.4f", sym, price, ema_f, ema_s)
 
-        # Otomatik açma / flip dene
-        self._maybe_auto_trade(sym)
+        # Sinyali hesapla
+        decision = self._decide_side(sym)
+
+        # Flip veya açılış dene
+        self._maybe_flip(sym, decision, price, ts)
 
         # Opsiyonel forward
         await self._forward_n8n(d)
