@@ -209,7 +209,7 @@ const TH = {
 // ---- Global state
 let currentSymbols = [];
 
-// snake_case ↔ camelCase picker
+// key picker
 const pick = (o, ...keys) => {
   for (const k of keys) {
     if (o==null) continue;
@@ -222,7 +222,7 @@ const pick = (o, ...keys) => {
   return undefined;
 };
 
-// array çıkarıcı
+// helpers
 function extractArray(j, preferredKeys=[]){
   if (Array.isArray(j)) return j;
   if (j && typeof j==='object'){
@@ -231,8 +231,6 @@ function extractArray(j, preferredKeys=[]){
   }
   return [];
 }
-
-// map {SYMBOL:{...}} -> array
 function mapToArrayBySymbol(obj){
   if (!obj || Array.isArray(obj) || typeof obj !== 'object') return [];
   return Object.entries(obj).map(([symbol, payload]) => ({ symbol, ...(payload||{}) }));
@@ -303,7 +301,6 @@ function decideSide(row){
 // --------- LOADERS ----------
 async function loadHealth(){
   try{
-    // önce /healthz, sonra /health
     let r = await fetch('/healthz',{cache:'no-store'});
     if (!r.ok) r = await fetch('/health',{cache:'no-store'});
     if (!r.ok) throw new Error('404');
@@ -328,11 +325,9 @@ async function loadSignals(){
     const j=await r.json();
     document.getElementById('dbgSignals').textContent = JSON.stringify(j,null,2);
 
-    // array ise al; değilse {SYMBOL:{...}} map'ini array'e çevir
     let raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','signals','ticks','items']);
     if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
 
-    // health boşsa sembolleri buradan çıkar
     if ((!currentSymbols || currentSymbols.length===0) && Array.isArray(raw) && raw.length){
       currentSymbols = [...new Set(raw.map(x => x.symbol).filter(Boolean))];
       if(currentSymbols.length) document.getElementById('symbolsBadge').textContent = currentSymbols.join(', ');
@@ -404,7 +399,7 @@ function renderSignalsTable(sigs){
   }
 }
 
-// --------- Positions ----------
+// --------- Positions (patched) ----------
 async function loadPositions(){
   const body=document.getElementById('posBody');
 
@@ -417,12 +412,11 @@ async function loadPositions(){
   }
 
   try{
-    // Önce /paper/positions (senin backend), olmazsa diğerleri
     const candidates = ['/paper/positions','/positions','/open_positions','/account/positions'];
-    let j = null, used = '';
+    let j = null;
     for(const path of candidates){
       j = await tryFetch(path);
-      if (j) { used = path; break; }
+      if (j) break;
     }
 
     if (!j){
@@ -433,11 +427,25 @@ async function loadPositions(){
 
     document.getElementById('dbgPositions').textContent = JSON.stringify(j,null,2);
 
-    // JSON array mi? değilse dizi çıkar veya {SYMBOL:{...}} map'ini çevir
-    let raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','positions','openPositions','items']);
-    if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
+    // Şema uyarlama:
+    // 1) { open: { SYM:{...} }, closed_count: N } ise:
+    let raw = null;
+    if (!Array.isArray(j) && j && typeof j === 'object' && j.open && typeof j.open === 'object') {
+      raw = mapToArrayBySymbol(j.open);
+    } else if (Array.isArray(j)) {
+      raw = j;
+    } else {
+      raw = extractArray(j, ['rows','data','positions','openPositions','items']);
+      if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
+    }
 
-    const rows = Array.isArray(raw) ? raw.map(normalizePosition) : [];
+    // 2) Sahte satırları ele
+    raw = (raw||[]).filter(r => {
+      const hasCore = r && (r.symbol || r.side || r.entry!=null || r.qty!=null);
+      return !!hasCore && r.symbol !== 'open' && r.symbol !== 'closed_count';
+    });
+
+    const rows = raw.map(normalizePosition);
 
     body.innerHTML='';
     if(rows.length===0){
@@ -543,6 +551,7 @@ function getSymbol(){ return (document.getElementById('symbolInput').value||'ETH
 function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value||'10',10)); }
 function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value||'10')); }
 
+// --------- Manual Order/Close (patched KPI refresh) ----------
 async function manualOpen(side){
   const symbol=getSymbol();
   const payload={symbol, side, leverage:getLev(), margin_usd:getMargin()};
@@ -551,19 +560,24 @@ async function manualOpen(side){
     const j=await r.json();
     if(!r.ok || j.ok===false) throw new Error(j.error||'order_failed');
     toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
-    loadPositions(); loadHistory(100); loadSummary();
+    loadPositions(); loadHistory(100);
+    setTimeout(loadSummary, 200);
+    setTimeout(loadSummary, 1200);
   }catch(e){ setLastError(`Order failed: ${e.message}`); }
 }
-async function manualClose(){ await closeSymbol(getSymbol()); }
-async function closeSymbol(symbol){
+async function manualClose(){
+  const symbol=getSymbol();
   try{
     const r=await fetch('/paper/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
     const j=await r.json();
     if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed');
     toast(`ℹ️ ${symbol} closed. PnL=$${j.closed?.pnl?.toFixed?.(2) ?? j.closed?.pnl ?? ''}`);
-    loadPositions(); loadHistory(100); loadSummary();
+    loadPositions(); loadHistory(100);
+    setTimeout(loadSummary, 200);
+    setTimeout(loadSummary, 1200);
   }catch(e){ setLastError(`Close failed: ${e.message}`); }
 }
+async function closeSymbol(symbol){ document.getElementById('symbolInput').value=symbol; await manualClose(); }
 
 async function clearHistory(){
   try{
