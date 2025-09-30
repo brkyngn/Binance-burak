@@ -37,7 +37,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 .kpi .value{font-size:22px;font-weight:700}
 @media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:700px){.kpis{grid-template-columns:repeat(2,1fr)}}
-/* SIGNALS styles */
+/* SIGNALS */
 .sig-long{ color: var(--pos); font-weight:700 }
 .sig-short{ color: var(--neg); font-weight:700 }
 .sig-raw{ color: var(--muted); font-weight:700 }
@@ -49,8 +49,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 .toast.show{opacity:1;transform:translateY(0)}
 .btn{background:#111827;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:8px 10px;font-weight:600;cursor:pointer}
 .btn:hover{filter:brightness(1.1)}
-.input{background:#0f172a;border:1px solid var(--line);color:#var(--fg);border-radius:8px;padding:6px 8px;width:120px}
-.code{white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-size:12px;background:#0f1626;border:1px solid var(--line);border-radius:10px;padding:10px;color:#cfe3ff}
+.input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:120px}
+.code{white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background:#0f1626;border:1px solid var(--line);border-radius:10px;padding:10px;color:#cfe3ff}
 </style>
 </head>
 <body>
@@ -72,7 +72,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
     <div class="kpi"><div class="label">Başarılı (Kârlı) İşlem</div><div class="value ok" id="kpiWins">0</div></div>
     <div class="kpi"><div class="label">Başarısız (Zararlı) İşlem</div><div class="value bad" id="kpiLosses">0</div></div>
     <div class="kpi"><div class="label">Başarı Oranı</div><div class="value" id="kpiWinRate">0%</div></div>
-    <div class="kpi"><div class="label">Toplam Net PNL</div><div class="value" id="kpiTotalPNL">$0.00</div></div>
+    <div class="kpi"><div class="label">Toplam PNL</div><div class="value" id="kpiTotalPNL">$0.00</div></div>
     <div class="kpi"><div class="label">Toplam İşlem</div><div class="value" id="kpiTotalTrades">0</div></div>
   </div>
 
@@ -174,12 +174,14 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
         <thead><tr>
           <th>Symbol</th><th>Side</th>
           <th class="num">Qty</th><th class="num">Entry</th><th class="num">Exit</th>
-          <th class="num">PNL</th><th class="num">Fee (USD)</th><th class="num">Net PNL</th>
+          <th class="num">PNL</th>
+          <th class="num">Fee (USD)</th>
+          <th class="num">Net PNL</th>
           <th class="num">Lev</th><th class="num">Margin</th>
           <th class="num">Notional</th><th class="num">Liq</th>
           <th class="num">Opened</th><th class="num">Closed</th>
         </tr></thead>
-        <tbody id="histBody"><tr><td class="muted" colspan="14">Bekleniyor…</td></tr></tbody>
+        <tbody id="histBody"><tr><td class="muted" colspan="12">Bekleniyor…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -208,6 +210,8 @@ const TH = {
   VWAP_WINDOW_SEC: {{ thresholds.VWAP_WINDOW_SEC|default(60) }},
   ATR_WINDOW_SEC: {{ thresholds.ATR_WINDOW_SEC|default(60) }},
 };
+// Fee oranı (backend template paramı verilmezse 0.0004)
+const FEE_RATE = {{ fee_rate|default(0.0004) }};
 
 // ---- Global state
 let currentSymbols = [];
@@ -239,6 +243,21 @@ function mapToArrayBySymbol(obj){
   return Object.entries(obj).map(([symbol, payload]) => ({ symbol, ...(payload||{}) }));
 }
 
+// ---- Fee & Net PnL yardımcıları ----
+function safeNum(x){ const n = Number(x); return Number.isFinite(n) ? n : 0; }
+function estimateFeeUSD(row){
+  if (row.fee_total_usd!=null && !Number.isNaN(row.fee_total_usd)) return Number(row.fee_total_usd);
+  const qty   = safeNum(row.qty);
+  const openN = safeNum(row.entry) * qty;
+  const closeN= safeNum(row.exit)  * qty;
+  return (openN + closeN) * FEE_RATE;
+}
+function netPnlUSD(row){
+  if (row.net_pnl!=null && !Number.isNaN(row.net_pnl)) return Number(row.net_pnl);
+  const pnl = safeNum(row.pnl);
+  return pnl - estimateFeeUSD(row);
+}
+
 // --------- Normalizers ----------
 function normalizePosition(p){
   return {
@@ -260,15 +279,15 @@ function normalizeHistoryRow(x){
     qty: Number(pick(x,'qty','quantity')),
     entry: Number(pick(x,'entry','entry_price')),
     exit: Number(pick(x,'exit','exit_price','close')),
-    pnl: Number(pick(x,'pnl','pnl_usd')),                 // ham pnl
-    fee_total_usd: Number(pick(x,'fee_total_usd','fees_usd')),
-    net_pnl: Number(pick(x,'net_pnl')),
+    pnl: Number(pick(x,'pnl','pnl_usd')),
+    fee_total_usd: Number(pick(x,'fee_total_usd','fees_usd','fee_usd')),
+    net_pnl: Number(pick(x,'net_pnl','net')),
     leverage: Number(pick(x,'leverage','lev')),
     margin_usd: Number(pick(x,'margin_usd','margin')),
     notional_usd: Number(pick(x,'notional_usd','notional')),
     liq_price: Number(pick(x,'liq_price','liquidation_price')),
-    opened_at: pick(x,'opened_at','open_ts','opened','open_time'),
-    closed_at: pick(x,'closed_at','close_ts','closed','close_time')
+    opened_at: pick(x,'opened_at','opened','open_time'),
+    closed_at: pick(x,'closed_at','closed','close_time')
   };
 }
 function normalizeSignal(s){
@@ -339,7 +358,6 @@ async function loadSignals(){
     }
 
     const sigs = raw.map(normalizeSignal);
-    // canlı fiyatları cache'le
     lastPrices = {};
     for (const s of sigs) {
       if (s.symbol && s.last_price != null && !Number.isNaN(s.last_price)) {
@@ -439,7 +457,6 @@ async function loadPositions(){
 
     document.getElementById('dbgPositions').textContent = JSON.stringify(j,null,2);
 
-    // şema uyarlama
     let raw = null;
     if (!Array.isArray(j) && j && typeof j === 'object' && j.open && typeof j.open === 'object') {
       raw = mapToArrayBySymbol(j.open);
@@ -450,15 +467,12 @@ async function loadPositions(){
       if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
     }
 
-    // sahte satırları ele
     raw = (raw||[]).filter(r => {
       const hasCore = r && (r.symbol || r.side || r.entry!=null || r.qty!=null);
       return !!hasCore && r.symbol !== 'open' && r.symbol !== 'closed_count';
     });
 
     const rows = raw.map(normalizePosition);
-
-    // eksikleri tamamla
     for (const r of rows) {
       if ((r.last_price==null || Number.isNaN(r.last_price)) && r.symbol && lastPrices[r.symbol]!=null) {
         r.last_price = lastPrices[r.symbol];
@@ -474,7 +488,6 @@ async function loadPositions(){
         }
       }
     }
-
     body.innerHTML='';
     if(rows.length===0){
       body.innerHTML = `<tr><td class="muted" colspan="10">Pozisyon yok.</td></tr>`;
@@ -511,10 +524,12 @@ async function loadHistory(limit=100){
     const rows = raw.map(normalizeHistoryRow);
     body.innerHTML='';
     if(rows.length===0){
-      body.innerHTML = `<tr><td class="muted" colspan="14">Kayıt yok.</td></tr>`;
+      body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`;
       return;
     }
     for(const x of rows){
+      const fee = estimateFeeUSD(x);
+      const net = netPnlUSD(x);
       const tr=document.createElement('tr');
       tr.innerHTML=`
         <td>${x.symbol}</td>
@@ -523,8 +538,8 @@ async function loadHistory(limit=100){
         <td class="num mono">${fmt4(x.entry)}</td>
         <td class="num mono">${fmt4(x.exit)}</td>
         <td class="num mono ${clsP(x.pnl)}">${fmt2(x.pnl)}</td>
-        <td class="num mono">${fmt2(x.fee_total_usd)}</td>
-        <td class="num mono ${clsP(x.net_pnl)}">${fmt2(x.net_pnl)}</td>
+        <td class="num mono">${fmt2(fee)}</td>
+        <td class="num mono ${clsP(net)}">${fmt2(net)}</td>
         <td class="num mono">${x.leverage??'-'}</td>
         <td class="num mono">${fmt2(x.margin_usd)}</td>
         <td class="num mono">${fmt2(x.notional_usd)}</td>
@@ -534,7 +549,7 @@ async function loadHistory(limit=100){
       body.appendChild(tr);
     }
   }catch(e){
-    body.innerHTML = `<tr><td class="muted" colspan="14">Yüklenemedi.</td></tr>`;
+    body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
     setLastError(`History error: ${e.message}`);
   }
 }
@@ -543,21 +558,21 @@ async function loadSummary(){
   try{
     const r=await fetch('/history?limit=10000',{cache:'no-store'});
     const j=await r.json();
-    const arr = extractArray(j,['rows','data','items']);
-    computeKPIs(arr||[]);
+    const arr = extractArray(j,['rows','data','items']) || [];
+    computeKPIs(arr);
     const dbEl=document.getElementById('dbSize');
-    if(dbEl) dbEl.textContent = String(Math.min((arr||[]).length, 10000));
+    if(dbEl) dbEl.textContent = String(Math.min(arr.length, 10000));
   }catch{ computeKPIs([]); }
 }
 
 function computeKPIs(rows){
   let longCnt=0, shortCnt=0, wins=0, losses=0, totalPNL=0;
-  for(const x of rows){
-    const side = pick(x,'side');
+  for(const raw of rows){
+    const x = normalizeHistoryRow(raw);
+    const side = x.side;
     if(side==='long') longCnt++; else if(side==='short') shortCnt++;
-    // önce net_pnl varsa onu kullan, yoksa pnl
-    const pnl = Number(pick(x,'net_pnl','pnl','pnl_usd'));
-    if(!Number.isNaN(pnl)){ totalPNL+=pnl; if(pnl>0) wins++; else if(pnl<0) losses++; }
+    const net = netPnlUSD(x);
+    if(!Number.isNaN(net)){ totalPNL+=net; if(net>0) wins++; else if(net<0) losses++; }
   }
   const totalWL=wins+losses;
   const winRate= totalWL>0? (wins/totalWL*100).toFixed(1) : '0.0';
@@ -582,7 +597,7 @@ function getSymbol(){ return (document.getElementById('symbolInput').value||'ETH
 function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value||'10',10)); }
 function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value||'10')); }
 
-// --------- Manual Order/Close (KPI refresh & net PnL toast) ----------
+// --------- Manual Order/Close ----------
 async function manualOpen(side){
   const symbol=getSymbol();
   const payload={symbol, side, leverage:getLev(), margin_usd:getMargin()};
@@ -603,11 +618,13 @@ async function manualClose(){
     const j=await r.json();
     if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed');
     const c = j.closed||{};
-    const raw = (c.pnl!=null)?Number(c.pnl):null;
-    const net = (c.net_pnl!=null)?Number(c.net_pnl):null;
-    const fee = (c.fee_total_usd!=null)?Number(c.fee_total_usd):null;
-    const msg = `ℹ️ ${symbol} closed. PnL=${raw!=null?fmt2(raw):'-'}  Fee=${fee!=null?fmt2(fee):'-'}  Net=${net!=null?fmt2(net):'-'}`;
-    toast(msg);
+    const row = {
+      qty: c.qty, entry: c.entry, exit: c.exit,
+      pnl: c.pnl, fee_total_usd: c.fee_total_usd, net_pnl: c.net_pnl
+    };
+    const fee = estimateFeeUSD(row);
+    const net = netPnlUSD(row);
+    toast(`ℹ️ ${symbol} closed. PnL=${fmt2(safeNum(c.pnl))}  Fee=${fmt2(fee)}  Net=${fmt2(net)}`);
     loadPositions(); loadHistory(100);
     setTimeout(loadSummary, 200);
     setTimeout(loadSummary, 1200);
