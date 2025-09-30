@@ -206,7 +206,7 @@ const TH = {
   ATR_WINDOW_SEC: {{ thresholds.ATR_WINDOW_SEC|default(60) }},
 };
 
-// ---- Global state for symbol filter from /health
+// ---- Global state
 let currentSymbols = [];
 
 // snake_case ↔ camelCase picker
@@ -222,7 +222,7 @@ const pick = (o, ...keys) => {
   return undefined;
 };
 
-// Extract first array from an object by preferred keys, else by scanning values
+// array çıkarıcı
 function extractArray(j, preferredKeys=[]){
   if (Array.isArray(j)) return j;
   if (j && typeof j==='object'){
@@ -230,6 +230,12 @@ function extractArray(j, preferredKeys=[]){
     for(const v of Object.values(j)){ if (Array.isArray(v)) return v; }
   }
   return [];
+}
+
+// map {SYMBOL:{...}} -> array
+function mapToArrayBySymbol(obj){
+  if (!obj || Array.isArray(obj) || typeof obj !== 'object') return [];
+  return Object.entries(obj).map(([symbol, payload]) => ({ symbol, ...(payload||{}) }));
 }
 
 // --------- Normalizers ----------
@@ -240,7 +246,7 @@ function normalizePosition(p){
     qty: Number(pick(p,'qty','quantity')),
     entry: Number(pick(p,'entry','entry_price')),
     liq_price: Number(pick(p,'liq_price','liq','liquidation_price')),
-    last_price: Number(pick(p,'last_price','last','lastPrice')),
+    last_price: Number(pick(p,'last_price','price','last','lastPrice')),
     pnl: Number(pick(p,'pnl','pnl_usd')),
     notional_usd: Number(pick(p,'notional_usd','notional')),
     leverage: Number(pick(p,'leverage','lev'))
@@ -298,31 +304,40 @@ function decideSide(row){
 async function loadHealth(){
   try{
     const r=await fetch('/health',{cache:'no-store'});
+    if (!r.ok) throw new Error('404');
     const j=await r.json();
     document.getElementById('dbgHealth').textContent = JSON.stringify(j,null,2);
     const syms = j?.symbols;
     if (Array.isArray(syms) && syms.length){
       currentSymbols = syms;
       document.getElementById('symbolsBadge').textContent = syms.join(', ');
-    }else{
-      currentSymbols = [];
-      document.getElementById('symbolsBadge').textContent = '—';
     }
     document.getElementById('streamBadge').textContent = j?.stream || '—';
-  }catch(e){
-    document.getElementById('dbgHealth').textContent = 'Yüklenemedi: '+e.message;
+  }catch{
+    // health yoksa, sembolleri signals sırasında dolduracağız
+    document.getElementById('dbgHealth').textContent = JSON.stringify({detail:"Not Found"}, null, 2);
+    document.getElementById('streamBadge').textContent = '—';
   }
 }
 
 async function loadSignals(){
   const tb=document.getElementById('signalsTBody');
   try{
-    const qs = currentSymbols.length ? `?symbols=${encodeURIComponent(currentSymbols.join(','))}` : '';
-    const r=await fetch(`/signals${qs}`,{cache:'no-store'});
+    const r=await fetch('/signals',{cache:'no-store'});
     const j=await r.json();
     document.getElementById('dbgSignals').textContent = JSON.stringify(j,null,2);
-    const raw = extractArray(j, ['rows','data','signals','ticks','items']);
-    const sigs = Array.isArray(raw) ? raw.map(normalizeSignal) : [];
+
+    // array ise al; değilse {SYMBOL:{...}} map'ini array'e çevir
+    let raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','signals','ticks','items']);
+    if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
+
+    // health boşsa sembolleri buradan çıkar
+    if ((!currentSymbols || currentSymbols.length===0) && Array.isArray(raw) && raw.length){
+      currentSymbols = [...new Set(raw.map(x => x.symbol).filter(Boolean))];
+      if(currentSymbols.length) document.getElementById('symbolsBadge').textContent = currentSymbols.join(', ');
+    }
+
+    const sigs = raw.map(normalizeSignal);
     renderSignalsTable(sigs);
     try{ document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);}catch{}
   }catch(e){
@@ -391,13 +406,34 @@ function renderSignalsTable(sigs){
 // --------- Positions ----------
 async function loadPositions(){
   const body=document.getElementById('posBody');
+
+  async function tryFetch(url){
+    try{
+      const r = await fetch(url,{cache:'no-store'});
+      if (!r.ok) return null;
+      return await r.json();
+    }catch{ return null; }
+  }
+
   try{
-    const qs = currentSymbols.length ? `?symbols=${encodeURIComponent(currentSymbols.join(','))}` : '';
-    const r=await fetch(`/positions${qs}`,{cache:'no-store'});
-    const j=await r.json();
+    // Olası yollar
+    const candidates = ['/positions','/open_positions','/account/positions'];
+    let j = null;
+    for(const path of candidates){
+      j = await tryFetch(path);
+      if (j) { break; }
+    }
+
+    if (!j){
+      document.getElementById('dbgPositions').textContent = JSON.stringify({detail:"Not Found"}, null, 2);
+      body.innerHTML = `<tr><td class="muted" colspan="10">Endpoint bulunamadı (/positions, /open_positions, /account/positions). Backend’te en az birini aç.</td></tr>`;
+      return;
+    }
+
     document.getElementById('dbgPositions').textContent = JSON.stringify(j,null,2);
-    const raw = extractArray(j, ['rows','data','positions','openPositions','items']);
+    const raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','positions','openPositions','items']);
     const rows = Array.isArray(raw) ? raw.map(normalizePosition) : [];
+
     body.innerHTML='';
     if(rows.length===0){
       body.innerHTML = `<tr><td class="muted" colspan="10">Pozisyon yok.</td></tr>`;
