@@ -7,17 +7,13 @@
   <style>
     :root {
       --bg:#0f1115; --panel:#171a21; --fg:#e8eaf0; --muted:#9aa3b2;
-      --pos:#17a34a; --neg:#ef4444; --thead:#212634; --line:#232838; --accent:#3b82f6;
-      --warn:#ffb020;
+      --pos:#17a34a; --neg:#ef4444; --thead:#212634; --line:#232838; --accent:#3b82f6; --warn:#ffb020;
     }
     html,body{background:var(--bg);color:var(--fg);margin:0;font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
     .wrap{max-width:1280px;margin:24px auto;padding:0 16px}
     h1{font-size:28px;margin:0 0 10px}
     h2{font-size:18px;margin:0 0 12px}
-    .row{display:grid;gap:18px}
-    @media(min-width:1000px){.row{grid-template-columns:2fr 1fr}}
-    @media(min-width:1200px){.row-3{grid-template-columns:2fr 1fr}}
-    .card{background:var(--panel);border-radius:14px;padding:16px 16px 12px;box-shadow:0 8px 18px rgba(0,0,0,.25)}
+    .card{background:var(--panel);border-radius:14px;padding:16px 16px 12px;box-shadow:0 8px 18px rgba(0,0,0,.25);margin-bottom:18px}
     table{width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden}
     thead th{background:var(--thead);color:var(--fg);font-weight:700;padding:10px;border-bottom:1px solid var(--line);text-align:left}
     tbody td{padding:10px;border-bottom:1px solid var(--line)}
@@ -55,7 +51,7 @@
   </div>
 
   <!-- Manuel Trade Paneli -->
-  <div class="card" style="margin-bottom:18px">
+  <div class="card">
     <h2>Manual Trade</h2>
     <div class="controls">
       <label>Leverage
@@ -80,108 +76,105 @@
     </div>
   </div>
 
-  <!-- ÜST SATIR: Positions + Signals -->
-  <div class="row">
-    <div class="card">
-      <h2>Open Positions</h2>
-      <table id="posTable">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th>Side</th>
-            <th class="num">Qty</th>
-            <th class="num">Entry</th>
-            <th class="num">TP</th>
-            <th class="num">SL</th>
-            <th class="num">Entry $</th>
-            <th class="num">TP $</th>
-            <th class="num">SL $</th>
-            <th class="num">PnL $</th>
-            <th class="num">Lev.</th>
-            <th class="num">Margin $</th>
-            <th class="num">Notional $</th>
-            <th class="num">Liq. Px</th>
-            <th class="num">Opened At</th>
-          </tr>
-        </thead>
-        <tbody id="posBody">
-          <tr><td class="muted" colspan="15">Yükleniyor…</td></tr>
-        </tbody>
-      </table>
-      <div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
-    </div>
-
-    <div class="card">
-      <h2>Signals (live)</h2>
-      <div class="hint" style="margin-bottom:8px">
-        Filtre eşikleri —
-        Tick/s ≥ <b>{{ thresholds.MIN_TICKS_PER_SEC|default(1.0) }}</b>,
-        Spread bps ≤ <b>{{ thresholds.MAX_SPREAD_BPS|default(5) }}</b>,
-        BuyPress ≥ <b>{{ thresholds.BUY_PRESSURE_MIN|default(0.55) }}</b>,
-        Imbalance ≥ <b>{{ thresholds.IMB_THRESHOLD|default(0.9) }}</b>,
-        ATR ∈ [<b>{{ thresholds.ATR_MIN|default(0.0002) }}</b>, <b>{{ thresholds.ATR_MAX|default(0.05) }}</b>],
-        VWAP sapma ≤ <b>0.20%</b>.
-      </div>
-      <div class="table-responsive">
-        <table class="table-compact" style="width:100%">
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Side</th>
-              <th class="num">Last</th>
-              <th class="num">EMAf</th>
-              <th class="num">EMAs</th>
-              <th class="num">RSI14</th>
-              <th class="num">VWAP ({{ thresholds.VWAP_WINDOW_SEC|default(60) }}s)</th>
-              <th class="num">ATR ({{ thresholds.ATR_WINDOW_SEC|default(60) }}s)</th>
-              <th class="num">Tick/s</th>
-              <th class="num">Spread bps</th>
-              <th class="num">BuyPress</th>
-              <th class="num">Imb</th>
-              <th class="num">Rules</th>
-            </tr>
-          </thead>
-          <tbody id="signalsTBody">
-            <tr><td class="muted" colspan="13">Yükleniyor…</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <details style="margin-top:10px">
-        <summary class="muted">Ham JSON’u göster</summary>
-        <pre id="signalsBox" style="margin-top:8px">Yükleniyor…</pre>
-      </details>
-    </div>
+  <!-- Open Positions (full width) -->
+  <div class="card">
+    <h2>Open Positions</h2>
+    <table id="posTable">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th class="num">Qty</th>
+          <th class="num">Entry</th>
+          <th class="num">TP</th>
+          <th class="num">SL</th>
+          <th class="num">Entry $</th>
+          <th class="num">TP $</th>
+          <th class="num">SL $</th>
+          <th class="num">PnL $</th>
+          <th class="num">Lev.</th>
+          <th class="num">Margin $</th>
+          <th class="num">Notional $</th>
+          <th class="num">Liq. Px</th>
+          <th class="num">Opened At</th>
+        </tr>
+      </thead>
+      <tbody id="posBody">
+        <tr><td class="muted" colspan="15">Yükleniyor…</td></tr>
+      </tbody>
+    </table>
+    <div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
   </div>
 
-  <!-- ALT SATIR: History -->
-  <div class="row-3" style="margin-top:18px">
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <h2>History (Last 100)</h2>
-        <button class="btn" onclick="loadHistory()">Yenile</button>
-      </div>
-      <table id="histTable">
+  <!-- Signals (live) now UNDER positions (full width) -->
+  <div class="card">
+    <h2>Signals (live)</h2>
+    <div class="hint" style="margin-bottom:8px">
+      Filtre eşikleri —
+      Tick/s ≥ <b>{{ thresholds.MIN_TICKS_PER_SEC|default(1.0) }}</b>,
+      Spread bps ≤ <b>{{ thresholds.MAX_SPREAD_BPS|default(5) }}</b>,
+      BuyPress ≥ <b>{{ thresholds.BUY_PRESSURE_MIN|default(0.55) }}</b>,
+      Imbalance ≥ <b>{{ thresholds.IMB_THRESHOLD|default(0.9) }}</b>,
+      ATR ∈ [<b>{{ thresholds.ATR_MIN|default(0.0002) }}</b>, <b>{{ thresholds.ATR_MAX|default(0.05) }}</b>],
+      VWAP sapma ≤ <b>0.20%</b>.
+    </div>
+    <div class="table-responsive">
+      <table class="table-compact" style="width:100%">
         <thead>
           <tr>
             <th>Symbol</th>
             <th>Side</th>
-            <th class="num">Qty</th>
-            <th class="num">Entry</th>
-            <th class="num">Exit</th>
-            <th class="num">PnL $</th>
-            <th class="num">Lev.</th>
-            <th class="num">Margin $</th>
-            <th class="num">Notional $</th>
-            <th class="num">Liq. Px</th>
-            <th class="num">Opened</th>
-            <th class="num">Closed</th>
+            <th class="num">Last</th>
+            <th class="num">EMAf</th>
+            <th class="num">EMAs</th>
+            <th class="num">RSI14</th>
+            <th class="num">VWAP ({{ thresholds.VWAP_WINDOW_SEC|default(60) }}s)</th>
+            <th class="num">ATR ({{ thresholds.ATR_WINDOW_SEC|default(60) }}s)</th>
+            <th class="num">Tick/s</th>
+            <th class="num">Spread bps</th>
+            <th class="num">BuyPress</th>
+            <th class="num">Imb</th>
+            <th class="num">Rules</th>
           </tr>
         </thead>
-        <tbody id="histBody">
-          <tr><td class="muted" colspan="12">Yükleniyor…</td></tr>
+        <tbody id="signalsTBody">
+          <tr><td class="muted" colspan="13">Yükleniyor…</td></tr>
         </tbody>
       </table>
     </div>
+    <details style="margin-top:10px">
+      <summary class="muted">Ham JSON’u göster</summary>
+      <pre id="signalsBox" style="margin-top:8px">Yükleniyor…</pre>
+    </details>
+  </div>
+
+  <!-- History (full width) -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>History (Last 100)</h2>
+      <button class="btn" onclick="loadHistory()">Yenile</button>
+    </div>
+    <table id="histTable">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th class="num">Qty</th>
+          <th class="num">Entry</th>
+          <th class="num">Exit</th>
+          <th class="num">PnL $</th>
+          <th class="num">Lev.</th>
+          <th class="num">Margin $</th>
+          <th class="num">Notional $</th>
+          <th class="num">Liq. Px</th>
+          <th class="num">Opened</th>
+          <th class="num">Closed</th>
+        </tr>
+      </thead>
+      <tbody id="histBody">
+        <tr><td class="muted" colspan="12">Yükleniyor…</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -202,7 +195,7 @@
   };
   const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
 
-  // thresholdlar (jinja ile geldi; gelmezse defaultlar)
+  // thresholdlar
   const TH = {
     MIN_TICKS_PER_SEC: {{ thresholds.MIN_TICKS_PER_SEC|default(1.0) }},
     MAX_SPREAD_BPS: {{ thresholds.MAX_SPREAD_BPS|default(5) }},
@@ -214,7 +207,7 @@
     ATR_WINDOW_SEC: {{ thresholds.ATR_WINDOW_SEC|default(60) }},
   };
 
-  // ---------- header badges ----------
+  // header badges
   async function loadHealth(){
     try{
       const r = await fetch('/healthz',{cache:'no-store'}); const j = await r.json();
@@ -224,7 +217,7 @@
   }
   setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString('tr-TR');},1000);
 
-  // ---------- positions ----------
+  // positions
   async function loadPositions(){
     const body = document.getElementById('posBody');
     try{
@@ -267,7 +260,7 @@
     }
   }
 
-  // ---------- signals (tablo + ham JSON) ----------
+  // signals
   function decideSide(row){
     const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s, rsi=row.rsi14;
     if([ef,es,bp].some(v=>v==null)) return null;
@@ -330,7 +323,7 @@
     }
   }
 
-  // ---------- history ----------
+  // history
   async function loadHistory(){
     const body = document.getElementById('histBody');
     try{
@@ -361,7 +354,7 @@
     }
   }
 
-  // ---------- manuel trade butonları ----------
+  // manuel trade butonları
   function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value || '10', 10)); }
   function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value || '10')); }
 
@@ -394,7 +387,7 @@
     }
   }
 
-  // ---------- küçük toast ----------
+  // küçük toast
   function toast(msg){
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -402,7 +395,7 @@
     setTimeout(()=>t.classList.remove('show'), 2500);
   }
 
-  // ---------- kick ----------
+  // kick
   loadHealth();
   loadPositions(); loadSignals(); loadHistory();
   setInterval(loadPositions, 2000);
