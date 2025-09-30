@@ -178,8 +178,8 @@ class BinanceWSClient:
                     return
 
                 # 2) Ters yönü aç (mutlak $ TP/SL)
-                lev = int(getattr(settings, "AUTO_LEVERAGE", settings.LEVERAGE))
-                margin = float(getattr(settings, "AUTO_MARGIN_USD", settings.MARGIN_PER_TRADE))
+                lev = int(getattr(settings, "AUTO_LEVERAGE", getattr(settings, "LEVERAGE", 10)))
+                margin = float(getattr(settings, "AUTO_MARGIN_USD", getattr(settings, "MARGIN_PER_TRADE", 10.0)))
                 notional = float(getattr(settings, "AUTO_NOTIONAL_USD", margin * lev))
                 qty = max(1e-8, round(notional / price, 6))
 
