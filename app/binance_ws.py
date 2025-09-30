@@ -14,7 +14,6 @@ from .paper import PaperBroker
 from .db import insert_trade
 
 def now_ms() -> int:
-    # küçük yardımcı (funding filtresi için)
     import time
     return int(time.time() * 1000)
 
@@ -38,7 +37,6 @@ class BinanceWSClient:
         self.signal_cooldown: dict[str, int] = {}  # symbol -> last_signal_ts(ms)
 
         # Flip için arka arkaya ters sinyal sayacı
-        # ör: {"BTCUSDT": {"want": "short", "count": 1}}
         self.flip_buffer: dict[str, dict[str, Optional[str] | int]] = {}
 
         # Pozisyon kapanınca DB'ye yaz
@@ -80,95 +78,77 @@ class BinanceWSClient:
 
     def _decide_side(self, sym: str) -> Optional[str]:
         """
-        GÜNCEL STRATEJİ (uygulanabilir olanlar):
-        LONG için Tümü:
-          Tick/s ≥ 2.0
-          Spread ≤ 2.0 bps
-          BuyPress ≥ 0.55
-          Imbalance ≥ 1.25
-          ATR ∈ [0.0008, 0.004]
-          VWAP sapma ≤ 0.20%
-          Volume Spike > 1.5x
-          CVD10m > 0
-          Funding zamanına > 20 dk (opsiyonel)
-          Yakın destek/direnç yok (sr_dist_pct > SR_NEAR_PCT)
+        Güncel strateji (eldeki verilerle uygulanabilir kısımlar):
+        LONG:
+          Tick/s ≥ 2.0, Spread ≤ 2.0bps, BuyPress ≥ 0.55, Imb ≥ 1.25,
+          ATR∈[0.0008,0.004], VWAP dev ≤0.20%, VolSpike>1.5x, CVD10m>0,
+          Funding>20dk, Yakın S/R yok (sr_dist_pct > SR_NEAR_PCT)
 
-        SHORT için Tümü:
-          Tick/s ≥ 2.0
-          Spread ≤ 2.0 bps
-          SellPress ≥ 0.55  (=> buy_pressure ≤ 0.45)
-          Imbalance ≤ 0.80
-          ATR ∈ [0.0008, 0.004]
-          Fiyat, VWAP'ın +0.10% ~ +0.20% bandında ÜSTÜNDE
-          Volume Spike > 1.5x + (mum yönüne bakılması lazım; burada sadece spike>1.5x uyguluyoruz)
-          CVD10m < 0
-          RSI > 65
-          Yakın direnç (sr_dist_pct ≤ SR_NEAR_PCT)
-          Funding rate > +0.01%  (HARİCİ veri, uygulanmıyor → pass)
+        SHORT:
+          Tick/s ≥ 2.0, Spread ≤ 2.0bps, SellPress ≥0.55 (=> buy_press ≤0.45),
+          Imb ≤0.80, ATR∈[0.0008,0.004], Fiyat VWAP’ın +0.10%~+0.20% bandında üstünde,
+          VolSpike>1.5x, CVD10m<0, RSI≥65, Yakın direnç (sr_dist_pct ≤ SR_NEAR_PCT),
+          + ek: 5s mum yönü "bear"
         """
         st = self.state.symbols.get(sym)
         if not st or st.last_price is None:
             return None
 
-        lp   = st.last_price
-        ef   = st.ema_fast.value
-        es   = st.ema_slow.value
-        rsi  = st.rsi_value
-        vwap = st.vwap(settings.VWAP_WINDOW_SEC * 1000)
-        vdev = st.vwap_dev_pct(settings.VWAP_WINDOW_SEC * 1000)
-        atr  = st.atr_like(settings.ATR_WINDOW_SEC * 1000)
-        spr  = st.spread_bps()
-        tick = st.tick_rate(2000)
-        bp   = st.buy_pressure(2000)
-        imb  = st.imbalance()
-        vsp  = st.volume_spike_ratio(5000, 60000)
-        cvd10= st.cvd(600_000)
-        sr_d = st.sr_near_pct(1_800_000, 3)
+        lp    = st.last_price
+        ef    = st.ema_fast.value
+        es    = st.ema_slow.value
+        rsi   = st.rsi_value
+        vwap  = st.vwap(settings.VWAP_WINDOW_SEC * 1000)
+        vdev  = st.vwap_dev_pct(settings.VWAP_WINDOW_SEC * 1000)
+        atr   = st.atr_like(settings.ATR_WINDOW_SEC * 1000)
+        spr   = st.spread_bps()
+        tick  = st.tick_rate(2000)
+        bp    = st.buy_pressure(2000)
+        imb   = st.imbalance()
+        vsp   = st.volume_spike_ratio(5000, 60000)
+        cvd10 = st.cvd(600_000)
+        sr_d  = st.sr_near_pct(1_800_000, 3)
+        c5    = st.candle_dir(5_000)
 
         # Temel veri kontrolleri
-        key_vals = (lp, ef, es, vwap, vdev, atr, spr, tick, bp, imb, vsp, cvd10, sr_d)
+        key_vals = (lp, ef, es, vwap, vdev, atr, spr, tick, bp, imb, vsp, cvd10, sr_d, c5)
         if any(v is None for v in key_vals):
             return None
 
         # Ortak filtreler
-        if tick < settings.MIN_TICKS_PER_SEC:
-            return None
-        if spr > settings.MAX_SPREAD_BPS:
-            return None
-        if atr < settings.ATR_MIN or atr > settings.ATR_MAX:
-            return None
-        if not self._funding_ok():
-            return None
+        if tick < settings.MIN_TICKS_PER_SEC: return None
+        if spr > settings.MAX_SPREAD_BPS:     return None
+        if atr < settings.ATR_MIN or atr > settings.ATR_MAX: return None
+        if not self._funding_ok():            return None
 
-        # LONG kuralları
+        # LONG
         long_ok = (
             ef > es and
             bp >= settings.BUY_PRESSURE_MIN and
             imb >= settings.IMB_LONG_MIN and
             vdev <= settings.VWAP_DEV_MAX_LONG and
-            vsp is not None and vsp > settings.VOLUME_SPIKE_MIN and
-            cvd10 is not None and cvd10 > 0 and
+            vsp > settings.VOLUME_SPIKE_MIN and
+            cvd10 > 0 and
             (sr_d is None or sr_d > settings.SR_NEAR_PCT) and
-            (rsi is None or rsi < 70)  # aşırı değil
+            (rsi is None or rsi < 70)
         )
 
-        # SHORT kuralları
-        short_band_ok = (
-            vdev is not None and
-            lp is not None and vwap is not None and
-            (lp > vwap) and
-            (settings.SHORT_VWAP_DEV_MIN <= (lp - vwap) / vwap <= settings.SHORT_VWAP_DEV_MAX)
+        # SHORT
+        dev_band_ok = (
+            lp > vwap and
+            settings.SHORT_VWAP_DEV_MIN <= (lp - vwap) / vwap <= settings.SHORT_VWAP_DEV_MAX
         )
-        sell_press = (bp is not None) and (bp <= (1.0 - settings.BUY_PRESSURE_MIN))  # >=0.55 sell press
+        sell_press = bp <= (1.0 - settings.BUY_PRESSURE_MIN)  # ≥0.55 sell pressure
         short_ok = (
             ef < es and
             sell_press and
             imb <= settings.IMB_SHORT_MAX and
-            short_band_ok and
-            vsp is not None and vsp > settings.VOLUME_SPIKE_MIN and
-            cvd10 is not None and cvd10 < 0 and
+            dev_band_ok and
+            vsp > settings.VOLUME_SPIKE_MIN and
+            cvd10 < 0 and
             (rsi is not None and rsi >= settings.RSI_SHORT_MIN) and
-            (sr_d is not None and sr_d <= settings.SR_NEAR_PCT)
+            (sr_d is not None and sr_d <= settings.SR_NEAR_PCT) and
+            (c5 == "bear")
         )
 
         if long_ok:
@@ -178,7 +158,7 @@ class BinanceWSClient:
         return None
 
     # ---------------------------------------------------
-    # Pozisyon aç/kapat yardımcıları (TP/SL mutlak $)
+    # Pozisyon aç/kapat yardımcıları
     # ---------------------------------------------------
     def _calc_auto_params(self, sym: str, side: str, entry_price: float) -> dict:
         lev = int(getattr(settings, "AUTO_LEVERAGE", 10))
@@ -350,7 +330,6 @@ class BinanceWSClient:
         out = {}
         snap = self.state.snapshot()
         for sym, st in snap.items():
-            # short band dev'i hesaplayalım (kolay debug için)
             lp = st.get("last_price")
             vwap = st.get("vwap60")
             short_band = None
@@ -374,6 +353,7 @@ class BinanceWSClient:
                 "vol_spike_5s": st.get("vol_spike_5s"),
                 "cvd_10m": st.get("cvd_10m"),
                 "sr_dist_pct": st.get("sr_dist_pct"),
+                "candle5_dir": st.get("candle5_dir"),
                 "short_vwap_band_ok": short_band,
             }
         return out
