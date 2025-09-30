@@ -187,6 +187,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 <div id="toast" class="toast">—</div>
 
 <script>
+  
+let lastPrices = {};   // signals'tan canlı fiyat cache'i
+  
 // ---------- Helpers ----------
 const fmt2 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(2);
 const fmt4 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(4);
@@ -334,6 +337,13 @@ async function loadSignals(){
     }
 
     const sigs = raw.map(normalizeSignal);
+    // canlı fiyatları cache'le
+    lastPrices = {};
+    for (const s of sigs) {
+    if (s.symbol && s.last_price != null && !Number.isNaN(s.last_price)) {
+    lastPrices[s.symbol] = Number(s.last_price);
+  }
+}
     renderSignalsTable(sigs);
     try{ document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);}catch{}
   }catch(e){
@@ -446,7 +456,22 @@ async function loadPositions(){
     });
 
     const rows = raw.map(normalizePosition);
-
+    // Eksik alanları tamamla (BTC için kritik)
+    for (const r of rows) {
+     if ((r.last_price==null || Number.isNaN(r.last_price)) && r.symbol && lastPrices[r.symbol]!=null) {
+    r.last_price = lastPrices[r.symbol];
+  }
+    if (r.notional_usd==null || Number.isNaN(r.notional_usd)) {
+    if (r.entry!=null && r.qty!=null) r.notional_usd = r.entry * r.qty;
+  }
+    if (r.pnl==null || Number.isNaN(r.pnl)) {
+    if (r.entry!=null && r.qty!=null && r.last_price!=null) {
+      r.pnl = (r.side==='short')
+        ? (r.entry - r.last_price) * r.qty
+        : (r.last_price - r.entry) * r.qty;
+    }
+  }
+}
     body.innerHTML='';
     if(rows.length===0){
       body.innerHTML = `<tr><td class="muted" colspan="10">Pozisyon yok.</td></tr>`;
