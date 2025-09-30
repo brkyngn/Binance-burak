@@ -1,23 +1,35 @@
 # app/config.py
-from pydantic_settings import BaseSettings  # <- v2: BaseSettings buraya taşındı
-from typing import List
+from typing import List, Optional
 import os
 
-def _csv_env(name: str, default: str = "") -> List[str]:
-    raw = os.getenv(name, default)
-    if not raw:
-        return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
+    # Pydantic Settings config
+    model_config = SettingsConfigDict(case_sensitive=False)
+
     # --- Binance WS ---
     WS_URL: str = os.getenv("WS_URL", "wss://stream.binance.com:9443/stream")
     STREAM: str = os.getenv("STREAM", "aggTrade")
     ENABLE_DEPTH: bool = os.getenv("ENABLE_DEPTH", "true").lower() == "true"
     DEPTH_STREAM: str = os.getenv("DEPTH_STREAM", "bookTicker")
 
-    # Symbols (CSV)
-    SYMBOLS: List[str] = _csv_env("SYMBOLS", "BTCUSDT,ETHUSDT")
+    # Symbols (CSV veya JSON array kabul eder)
+    SYMBOLS: List[str] = ["BTCUSDT", "ETHUSDT"]
+
+    @field_validator("SYMBOLS", mode="before")
+    @classmethod
+    def _parse_symbols(cls, v):
+        # JSON array gelirse (list) direkt döndür
+        if isinstance(v, list):
+            return v
+        # CSV string gelirse böl
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        # Hiçbiri değilse olduğu gibi bırak (pydantic handle eder)
+        return v
 
     # Reconnect/backoff
     BACKOFF_BASE: float = float(os.getenv("BACKOFF_BASE", "2.0"))
@@ -26,7 +38,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
     # N8n webhook (opsiyonel)
-    N8N_WEBHOOK_URL: str | None = os.getenv("N8N_WEBHOOK_URL")
+    N8N_WEBHOOK_URL: Optional[str] = os.getenv("N8N_WEBHOOK_URL")
 
     # Paper broker
     MAX_POSITIONS: int = int(os.getenv("MAX_POSITIONS", "10"))
@@ -52,10 +64,7 @@ class Settings(BaseSettings):
     FEE_RATE: float = float(os.getenv("FEE_RATE", "0.0004"))
 
     # DB
-    DATABASE_URL: str | None = os.getenv("DATABASE_URL")
+    DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
 
-    model_config = {
-        "case_sensitive": False
-    }
 
 settings = Settings()
