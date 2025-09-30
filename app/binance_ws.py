@@ -1,5 +1,8 @@
+# app/binance_ws.py
 import asyncio
 import json
+from typing import Optional
+
 import aiohttp
 import websockets
 from websockets import ConnectionClosedError, WebSocketException
@@ -13,26 +16,28 @@ from .db import insert_trade
 
 class BinanceWSClient:
     def __init__(self):
-        # Konfig
+        # --- Konfig ---
         self.ws_url = settings.WS_URL
-        self.trade_stream = settings.STREAM          # ör. "aggTrade"
-        self.depth_stream = settings.DEPTH_STREAM    # ör. "bookTicker"
+        self.trade_stream = settings.STREAM            # "aggTrade"
+        self.depth_stream = settings.DEPTH_STREAM      # "bookTicker"
         self.enable_depth = settings.ENABLE_DEPTH
 
-        # Semboller
+        # --- Semboller ---
         self.symbols_l = [s.lower() for s in settings.SYMBOLS]
         self.symbols_u = [s.upper() for s in settings.SYMBOLS]
 
-        # Opsiyonel webhook
+        # Opsiyonel webhook (n8n)
         self.n8n_url = settings.N8N_WEBHOOK_URL
 
-        # Durum & paper
+        # --- Durum & Paper Broker ---
         self.state = MarketState(self.symbols_u)
-        self.signal_cooldown = {}  # symbol -> ts(ms)
+        self.signal_cooldown: dict[str, int] = {}  # symbol -> last_signal_ts(ms)
+
+        # Pozisyon kapanınca DB'ye yaz
         self.paper = PaperBroker(
             max_positions=settings.MAX_POSITIONS,
             daily_loss_limit=None,
-            on_close=lambda rec: asyncio.create_task(insert_trade(rec))
+            on_close=lambda rec: asyncio.create_task(insert_trade(rec)),
         )
 
         self._running = False
@@ -57,102 +62,173 @@ class BinanceWSClient:
             logger.exception("n8n forward error: %s", e)
 
     # ---------------------------------------------------
-    # Otomatik trade: 10$ pozisyon, %3 TP/SL
+    # Sinyal koşulları (yön kararı) + otomatik trade
     # ---------------------------------------------------
+    def _decide_side(self, sym: str) -> Optional[str]:
+        """
+        Basit yön kararı:
+          - Filtreler: spread, atr, tickrate, vwap sapması
+          - Trend/Momentum: EMA cross
+          - Orderflow: buy_pressure
+        Dönüş: "long" | "short" | None
+        """
+        st = self.state.symbols.get(sym)
+        if not st or st.last_price is None:
+            return None
+
+        lp = st.last_price
+        ef = st.ema_fast.value
+        es = st.ema_slow.value
+        rsi = getattr(st, "rsi_val", None)  # state.py RSI hesaplıyor
+        vwap = st.vwap(settings.VWAP_WINDOW_SEC * 1000)
+        atr = st.atr_like(settings.ATR_WINDOW_SEC * 1000)
+        spread = st.spread_bps()
+        tick = st.tick_rate(2000)
+        bp = st.buy_pressure(2000)
+
+        # Veri eksikse karar yok
+        if None in (lp, ef, es, vwap, atr, spread, tick, bp):
+            return None
+
+        # Filtreler
+        if spread > settings.MAX_SPREAD_BPS:
+            return None
+        if atr < settings.ATR_MIN or atr > settings.ATR_MAX:
+            return None
+        if tick < settings.MIN_TICKS_PER_SEC:
+            return None
+
+        vwap_dev = abs(lp - vwap) / vwap if vwap else 0.0
+        if vwap_dev > 0.002:  # %0.2 sapma sınırı
+            return None
+
+        # Yön
+        if ef > es and (bp >= settings.BUY_PRESSURE_MIN):
+            # rsi varsa üst sınır rahat: < 70
+            if rsi is None or rsi < 70:
+                return "long"
+        if ef < es and (bp <= 1 - settings.BUY_PRESSURE_MIN):
+            # rsi varsa alt sınır rahat: > 30
+            if rsi is None or rsi > 30:
+                return "short"
+
+        return None
+
     def _maybe_auto_trade(self, sym: str):
-        sigs = self.get_signals()
-        sig = sigs.get(sym)
-        if not sig:
+        side = self._decide_side(sym)
+        if side is None:
             return
 
-        side = sig.get("side")
-        price = self.state.snapshot()[sym]["last_price"]
-        if price is None:
+        st = self.state.symbols.get(sym)
+        if not st or st.last_price is None:
+            return
+        price = st.last_price
+        ts = st.last_ts or 0
+
+        # Cooldown
+        last = self.signal_cooldown.get(sym, 0)
+        if ts - last < getattr(settings, "SIGNAL_COOLDOWN_MS", 3000):
             return
 
-        open_pos = self.paper.positions.get(sym)
+        # Zaten açık pozisyon varsa açma
+        if sym in self.paper.positions:
+            return
 
-        # Pozisyon yoksa → yeni aç
-        if not open_pos:
-            qty = round(10.0 / price, 6)  # 10$ değerinde miktar
-            if side == "long":
-                stop = price * 0.97       # -%3 stop
-                tp   = price * 1.03       # +%3 kar al
-            else:
-                stop = price * 1.03
-                tp   = price * 0.97
-            self.paper.open(sym, side, qty, price, stop, tp)
-            logger.info(f"AUTO-OPEN {sym} side={side} qty={qty} entry={price:.2f}")
+        # Kaldıraç/marj → qty
+        lev = settings.LEVERAGE
+        margin = settings.MARGIN_PER_TRADE
+        notional = margin * lev
+        qty = max(1e-8, round(notional / price, 6))
 
+        # TP / SL
+        if side == "long":
+            tp = price * (1 + settings.AUTO_TP_PCT)
+            sl = price * (1 - settings.AUTO_SL_PCT)
         else:
-            # Pozisyon varsa TP/SL kontrolü
-            entry = open_pos.entry
-            pnl_pct = (price - entry) / entry * (1 if open_pos.side == "long" else -1)
-            if pnl_pct >= 0.03 or pnl_pct <= -0.03:
-                self.paper.close(sym, price)
-                logger.info(f"AUTO-CLOSE {sym} side={open_pos.side} exit={price:.2f} pnl_pct={pnl_pct*100:.2f}%")
+            tp = price * (1 - settings.AUTO_TP_PCT)
+            sl = price * (1 + settings.AUTO_SL_PCT)
+
+        try:
+            self.paper.open(
+                sym, side, qty, price, sl, tp,
+                leverage=lev, margin_usd=margin, maint_margin_rate=settings.MAINT_MARGIN_RATE
+            )
+            self.signal_cooldown[sym] = ts
+            logger.info(
+                "AUTO-OPEN %s %s qty=%s entry=%.2f lev=%dx margin=$%.2f notional=$%.2f tp=%.2f sl=%.2f",
+                sym, side, qty, price, lev, margin, notional, tp, sl
+            )
+        except Exception as e:
+            logger.warning("AUTO-OPEN failed %s: %s", sym, e)
 
     # ---------------------------------------------------
     # Handlers
     # ---------------------------------------------------
     async def _handle_agg_trade(self, data: dict):
         """
-        aggTrade payload:
-        {"e":"aggTrade","E":...,"s":"BTCUSDT","p":"61750.12","q":"0.001","T":...,"m":false,...}
+        aggTrade payload (combined stream'te data altında gelir):
+        {
+          "e":"aggTrade","E":...,"s":"BTCUSDT",
+          "p":"61750.12","q":"0.001","T":...,"m":false,...
+        }
         """
-        sym = data.get("s")
-        if not sym or "p" not in data or "q" not in data or "T" not in data:
+        d = data.get("data") if "data" in data else data
+        sym = d.get("s")
+        if not sym or "p" not in d or "q" not in d or "T" not in d:
             return
         try:
-            price = float(data["p"])
-            qty = float(data["q"])
-            ts = int(data["T"])
-            buyer_is_maker = bool(data.get("m")) if "m" in data else None
+            price = float(d["p"])
+            qty = float(d["q"])
+            ts = int(d["T"])
+            buyer_is_maker = bool(d.get("m")) if "m" in d else None  # m=True → buyer is maker → sell aggressor
         except Exception:
             return
 
+        # State güncelle
         ema_f, ema_s = self.state.on_agg_trade(sym, price, qty, ts, buyer_is_maker)
-        if ema_f is None or ema_s is None:
-            return
 
+        # Paper PnL & stop/tp/liq kontrol
         self.paper.mark_to_market(sym, price)
 
-        logger.info("TICK %s p=%s ema5=%.4f ema20=%.4f", sym, data["p"], ema_f, ema_s)
+        if ema_f is not None and ema_s is not None:
+            logger.info("TICK %s p=%.8f ema_fast=%.4f ema_slow=%.4f", sym, price, ema_f, ema_s)
 
-        # Otomatik trade kontrolü
+        # Otomatik açma dene
         self._maybe_auto_trade(sym)
 
-        # Webhook'a forward (opsiyonel)
-        await self._forward_n8n(data)
+        # Opsiyonel forward
+        await self._forward_n8n(d)
 
     async def _handle_depth(self, data: dict):
         """
-        bookTicker payload (combined stream 'symbol@bookTicker'):
+        bookTicker payload (combined stream'te data altında gelebilir):
         {"s":"BTCUSDT","b":"61700.00","B":"1.234","a":"61700.10","A":"0.987","E":...}
         """
+        d = data.get("data") if "data" in data else data
         try:
-            d = data.get("data") if "data" in data else data
             sym = d.get("s")
             if not sym:
                 return
             best_bid = float(d["b"])
             best_ask = float(d["a"])
-            bid_vol  = float(d.get("B", "0"))
-            ask_vol  = float(d.get("A", "0"))
-            ts       = int(d.get("E") or 0)
+            bid_vol = float(d.get("B", "0"))
+            ask_vol = float(d.get("A", "0"))
+            ts = int(d.get("E") or 0)
         except Exception:
             return
 
         self.state.on_top(sym, best_bid, best_ask, bid_vol, ask_vol, ts)
 
     # ---------------------------------------------------
-    # WS döngüleri
+    # WS Döngüleri
     # ---------------------------------------------------
     async def _ws_loop(self, per_symbol_stream: str, handler):
         params = self._build_streams(per_symbol_stream)
         url = f"{self.ws_url}?streams={params}"
         logger.info("Connecting WS: %s", url)
-        async with websockets.connect(url, ping_interval=20, ping_timeout=20, max_queue=2048) as ws:
+        async with websockets.connect(
+            url, ping_interval=20, ping_timeout=20, max_queue=2048
+        ) as ws:
             async for raw in ws:
                 try:
                     msg = json.loads(raw)
@@ -162,7 +238,7 @@ class BinanceWSClient:
                 if not isinstance(data, dict):
                     continue
                 try:
-                    await handler(data)
+                    await handler(msg)  # handler içinde "data" kontrolü var
                 except Exception as e:
                     logger.warning("handler error (%s): %s", per_symbol_stream, e)
 
@@ -171,7 +247,9 @@ class BinanceWSClient:
         while self._running:
             try:
                 tasks = []
+                # Trade akışı
                 tasks.append(asyncio.create_task(self._ws_loop(self.trade_stream, self._handle_agg_trade)))
+                # Depth/bookTicker akışı (opsiyonel)
                 if self.enable_depth:
                     tasks.append(asyncio.create_task(self._ws_loop(self.depth_stream, self._handle_depth)))
                 await asyncio.gather(*tasks)
@@ -187,54 +265,28 @@ class BinanceWSClient:
         self._running = False
 
     # ---------------------------------------------------
-    # Sinyal getter
+    # Basit sinyal görünümü (/signals için)
     # ---------------------------------------------------
     def get_signals(self) -> dict:
         """
-        Basit scalping sinyalleri: EMA cross + RSI + VWAP + ATR + spread + tickrate + orderflow
+        Her sembol için basit bir sinyal özeti döner:
+          - side: "long" | "short" | None (şu anki kurallara göre)
+          - last_price, ema_fast, ema_slow, rsi14, vwap60, atr60, tick rate, spread, buy pressure
         """
-        sigs = {}
+        out = {}
         snap = self.state.snapshot()
         for sym, st in snap.items():
-            lp = st.get("last_price")
-            ef = st.get("ema_fast")
-            es = st.get("ema_slow")
-            rsi = st.get("rsi14")
-            vwap = st.get("vwap60")
-            atr = st.get("atr60")
-            spread = st.get("spread_bps")
-            tick = st.get("tick_rate_2s")
-            bp = st.get("buy_pressure_2s")
-
-            if None in (lp, ef, es, rsi, vwap, atr, spread, tick, bp):
-                continue
-
-            max_spread = 5
-            min_tick = 1.0
-            min_atr = 0.0002
-            max_vwap_dev = 0.002   # %0.2 sapma
-
-            vwap_dev = abs(lp - vwap) / vwap if vwap else 0.0
-
-            if spread > max_spread or tick < min_tick or atr < min_atr or vwap_dev > max_vwap_dev:
-                continue
-
-            side = None
-            if ef > es and rsi < 70 and bp >= 0.55:
-                side = "long"
-            elif ef < es and rsi > 30 and bp <= 0.45:
-                side = "short"
-
-            if side:
-                sigs[sym] = {
-                    "side": side,
-                    "ema_fast": ef,
-                    "ema_slow": es,
-                    "rsi14": rsi,
-                    "vwap_dev": round(vwap_dev*100, 3),
-                    "atr60": atr,
-                    "spread_bps": spread,
-                    "tick_rate": tick,
-                    "buy_pressure": bp,
-                }
-        return sigs
+            out[sym] = {
+                "side": self._decide_side(sym),
+                "last_price": st.get("last_price"),
+                "ema_fast": st.get("ema_fast"),
+                "ema_slow": st.get("ema_slow"),
+                "rsi14": st.get("rsi14"),
+                "vwap60": st.get("vwap60"),
+                "atr60": st.get("atr60"),
+                "tick_rate_2s": st.get("tick_rate_2s"),
+                "spread_bps": st.get("spread_bps"),
+                "buy_pressure_2s": st.get("buy_pressure_2s"),
+                "imbalance": st.get("imbalance"),
+            }
+        return out
