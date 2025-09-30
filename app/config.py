@@ -1,39 +1,23 @@
 # app/config.py
 from typing import Optional, List
 import os
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
+import json
 
 def _parse_symbols_str(s: str) -> List[str]:
-    """
-    Env'den gelen SYMBOLS değerini listeye çevirir.
-    Kabul ettiği formatlar:
-      - CSV: "BTCUSDT,ETHUSDT"
-      - JSON benzeri: ["BTCUSDT","ETHUSDT"]   (tek tırnaklı da gelse çalıştırmaya çalışıyoruz)
-    """
     if not s:
         return []
     s = s.strip()
-
-    # JSON dizi gibi görünüyorsa önce kenar köşeleri topla
+    # JSON array ise (tek tırnakları düzelt)
     if s.startswith("[") and s.endswith("]"):
-        # çift tırnak yoksa düzelt
-        s_clean = s.replace("'", '"')
         try:
-            import json
-            arr = json.loads(s_clean)
-            if isinstance(arr, list):
-                return [str(x).strip() for x in arr if str(x).strip()]
+            return [x for x in json.loads(s.replace("'", '"')) if str(x).strip()]
         except Exception:
-            pass  # aşağıda CSV'ye düşelim
-
-    # CSV split
+            pass
+    # CSV fallback
     return [part.strip() for part in s.split(",") if part.strip()]
 
-
 class Settings(BaseSettings):
-    # Pydantic v2 settings config
     model_config = SettingsConfigDict(case_sensitive=False)
 
     # --- Binance WS ---
@@ -42,8 +26,7 @@ class Settings(BaseSettings):
     ENABLE_DEPTH: bool = os.getenv("ENABLE_DEPTH", "true").lower() == "true"
     DEPTH_STREAM: str = os.getenv("DEPTH_STREAM", "bookTicker")
 
-    # SYMBOLS'ü doğrudan List[str] olarak tanımlamıyoruz.
-    # Env'den STRING alıyoruz, sonra property ile listeye çeviriyoruz.
+    # Sadece STRING okuyup kendimiz parse edeceğiz
     SYMBOLS_RAW: str = os.getenv("SYMBOLS", "BTCUSDT,ETHUSDT")
 
     # Reconnect/backoff
@@ -81,10 +64,9 @@ class Settings(BaseSettings):
     # DB
     DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
 
-    # ---- Türetilmiş alanlar ----
+    # Türetilmiş: her yerde bunu kullan
     @property
     def SYMBOLS(self) -> List[str]:
         return _parse_symbols_str(self.SYMBOLS_RAW)
-
 
 settings = Settings()
