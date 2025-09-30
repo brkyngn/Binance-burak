@@ -1,7 +1,7 @@
 import asyncio
 import os
 from fastapi import FastAPI, Body, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
 from .binance_ws import BinanceWSClient
@@ -19,6 +19,13 @@ templates = Jinja2Templates(directory="app/templates")
 # Binance WS Client
 # -----------------------------
 client = BinanceWSClient()
+
+# -----------------------------
+# Root (cron ping için 200 OK)
+# -----------------------------
+@app.get("/", response_class=PlainTextResponse)
+async def root():
+    return "OK"
 
 # -----------------------------
 # Startup & Shutdown
@@ -62,18 +69,46 @@ async def paper_positions():
 @app.post("/paper/order")
 async def paper_order(
     symbol: str = Body(..., embed=True),
-    side: str = Body(..., embed=True),         # "long" | "short"
-    qty: float = Body(1.0, embed=True),
+    side: str = Body(..., embed=True),                   # "long" | "short"
+    qty: float | None = Body(None, embed=True),          # opsiyonel; margin varsa otomatik hesaplanır
     stop: float | None = Body(None, embed=True),
     tp: float | None = Body(None, embed=True),
+    leverage: int | None = Body(None, embed=True),       # yeni: kaldıraç
+    margin_usd: float | None = Body(None, embed=True),   # yeni: marj ($)
 ):
     snap = client.state.snapshot().get(symbol.upper())
     if not snap or snap["last_price"] is None:
         return JSONResponse({"ok": False, "error": "No last price yet"}, status_code=400)
     price = float(snap["last_price"])
+
+    # Varsayılanları settings’ten al
+    lev = leverage if leverage is not None else settings.LEVERAGE
+    margin = margin_usd if margin_usd is not None else settings.MARGIN_PER_TRADE
+
+    # qty hesabı: margin*leverage / price (margin+lev varsa)
+    eff_qty = qty
+    if eff_qty is None and margin is not None and lev is not None:
+        eff_qty = round((margin * lev) / price, 6)
+
+    if eff_qty is None or eff_qty <= 0:
+        return JSONResponse(
+            {"ok": False, "error": "qty must be positive (or provide margin_usd + leverage)"},
+            status_code=400,
+        )
+
     try:
-        pos = client.paper.open(symbol.upper(), side, qty, price, stop, tp)
-        return JSONResponse({"ok": True, "opened": {"symbol": pos.symbol, "side": pos.side, "entry": pos.entry}})
+        pos = client.paper.open(
+            symbol.upper(), side, eff_qty, price, stop, tp,
+            leverage=lev, margin_usd=margin, maint_margin_rate=settings.MAINT_MARGIN_RATE
+        )
+        return JSONResponse({"ok": True, "opened": {
+            "symbol": pos.symbol,
+            "side": pos.side,
+            "entry": pos.entry,
+            "qty": pos.qty,
+            "leverage": pos.leverage,
+            "margin_usd": pos.margin_usd
+        }})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
@@ -85,7 +120,9 @@ async def paper_close(symbol: str = Body(..., embed=True)):
     price = float(snap["last_price"])
     try:
         pos = client.paper.close(symbol.upper(), price)
-        return JSONResponse({"ok": True, "closed": {"symbol": pos.symbol, "pnl": pos.pnl, "exit": pos.exit_price}})
+        return JSONResponse({"ok": True, "closed": {
+            "symbol": pos.symbol, "pnl": pos.pnl, "exit": pos.exit_price
+        }})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
