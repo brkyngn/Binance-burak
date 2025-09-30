@@ -31,6 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 """
 
 async def init_pool():
+    """DB pool + DDL."""
     global _pool
     if not settings.DATABASE_URL:
         return
@@ -38,10 +39,22 @@ async def init_pool():
     async with _pool.acquire() as conn:
         await conn.execute(DDL)
 
+async def ping() -> bool:
+    """Basit bağlantı testi."""
+    if not settings.DATABASE_URL:
+        return False
+    global _pool
+    if _pool is None:
+        await init_pool()
+    try:
+        async with _pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        return True
+    except Exception:
+        return False
+
 async def insert_trade(rec: dict):
-    """
-    rec: PaperBroker.close sonrası gelen snapshot
-    """
+    """PaperBroker.close sonrası snapshot'ı kaydet."""
     if not settings.DATABASE_URL:
         return
     global _pool
@@ -62,14 +75,14 @@ async def insert_trade(rec: dict):
             rec.get("side"),
             float(rec.get("qty") or 0),
             float(rec.get("entry") or 0),
-            float(rec.get("exit") or 0) if rec.get("exit") is not None else None,
+            float(rec.get("exit")) if rec.get("exit") is not None else None,
             float(rec.get("pnl") or 0),
-            int(rec.get("leverage") or 0) if rec.get("leverage") is not None else None,
-            float(rec.get("margin_usd") or 0) if rec.get("margin_usd") is not None else None,
-            float(rec.get("notional_usd") or 0) if rec.get("notional_usd") is not None else None,
-            float(rec.get("liq_price") or 0) if rec.get("liq_price") is not None else None,
-            int(rec.get("open_ts") or 0) if rec.get("open_ts") is not None else None,
-            int(rec.get("close_ts") or 0) if rec.get("close_ts") is not None else None,
+            int(rec.get("leverage")) if rec.get("leverage") is not None else None,
+            float(rec.get("margin_usd")) if rec.get("margin_usd") is not None else None,
+            float(rec.get("notional_usd")) if rec.get("notional_usd") is not None else None,
+            float(rec.get("liq_price")) if rec.get("liq_price") is not None else None,
+            int(rec.get("open_ts")) if rec.get("open_ts") is not None else None,
+            int(rec.get("close_ts")) if rec.get("close_ts") is not None else None,
             json.dumps(rec),
         )
 
@@ -82,6 +95,7 @@ def _ms_to_iso(ms: int | None) -> str | None:
         return None
 
 async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
+    """Son işlemler (JSON-serializable)."""
     if not settings.DATABASE_URL:
         return []
     global _pool
@@ -97,25 +111,27 @@ async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
             ORDER BY id DESC
             LIMIT $1
             """,
-            limit,
+            int(limit),
         )
-    out = []
+    out: List[dict[str, Any]] = []
     for r in rows:
+        # created_at datetime olabilir → isoformat'a çevir
+        created_at_iso = r["created_at"].isoformat() if r["created_at"] else None
         out.append({
             "symbol": r["symbol"],
             "side": r["side"],
-            "qty": float(r["qty"]),
-            "entry": float(r["entry"]),
+            "qty": float(r["qty"]) if r["qty"] is not None else None,
+            "entry": float(r["entry"]) if r["entry"] is not None else None,
             "exit": float(r["exit"]) if r["exit"] is not None else None,
-            "pnl": float(r["pnl"]),
-            "leverage": r["leverage"],
+            "pnl": float(r["pnl"]) if r["pnl"] is not None else None,
+            "leverage": int(r["leverage"]) if r["leverage"] is not None else None,
             "margin_usd": float(r["margin_usd"]) if r["margin_usd"] is not None else None,
             "notional_usd": float(r["notional_usd"]) if r["notional_usd"] is not None else None,
             "liq_price": float(r["liq_price"]) if r["liq_price"] is not None else None,
-            "open_ts": r["open_ts"],
-            "close_ts": r["close_ts"],
+            "open_ts": int(r["open_ts"]) if r["open_ts"] is not None else None,
+            "close_ts": int(r["close_ts"]) if r["close_ts"] is not None else None,
             "opened_at": _ms_to_iso(r["open_ts"]),
             "closed_at": _ms_to_iso(r["close_ts"]),
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "created_at": created_at_iso,
         })
     return out
