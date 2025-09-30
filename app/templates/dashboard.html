@@ -8,6 +8,7 @@
     :root {
       --bg:#0f1115; --panel:#171a21; --fg:#e8eaf0; --muted:#9aa3b2;
       --pos:#17a34a; --neg:#ef4444; --thead:#212634; --line:#232838; --accent:#3b82f6;
+      --warn:#ffb020;
     }
     html,body{background:var(--bg);color:var(--fg);margin:0;font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
     .wrap{max-width:1280px;margin:24px auto;padding:0 16px}
@@ -36,6 +37,14 @@
     .input{background:#0f172a;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 8px;width:90px}
     .toast{position:fixed;right:16px;bottom:16px;background:#0c111b;border:1px solid #223049;color:#e8eaf0;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:all .2s}
     .toast.show{opacity:1;transform:translateY(0)}
+    /* signals */
+    .ok{color:var(--pos);font-weight:600}
+    .bad{color:var(--neg);font-weight:600}
+    .warn{color:var(--warn);font-weight:600}
+    .chip{padding:.1rem .35rem;border-radius:.35rem;background:#111827;border:1px solid #1f2937}
+    details summary{cursor:pointer;list-style:none}
+    details summary::-webkit-details-marker{display:none}
+    .mono{font-variant-numeric:tabular-nums}
   </style>
 </head>
 <body>
@@ -103,9 +112,44 @@
     </div>
 
     <div class="card">
-      <h2>Signals (raw)</h2>
-      <pre id="signalsBox">Yükleniyor…</pre>
-      <div class="hint">Anlık yön/filtre görünümü ham JSON olarak gösterilir.</div>
+      <h2>Signals (live)</h2>
+      <div class="hint" style="margin-bottom:8px">
+        Filtre eşikleri —
+        Tick/s ≥ <b>{{ thresholds.MIN_TICKS_PER_SEC|default(1.0) }}</b>,
+        Spread bps ≤ <b>{{ thresholds.MAX_SPREAD_BPS|default(5) }}</b>,
+        BuyPress ≥ <b>{{ thresholds.BUY_PRESSURE_MIN|default(0.55) }}</b>,
+        Imbalance ≥ <b>{{ thresholds.IMB_THRESHOLD|default(0.9) }}</b>,
+        ATR ∈ [<b>{{ thresholds.ATR_MIN|default(0.0002) }}</b>, <b>{{ thresholds.ATR_MAX|default(0.05) }}</b>],
+        VWAP sapma ≤ <b>0.20%</b>.
+      </div>
+      <div class="table-responsive">
+        <table class="table-compact" style="width:100%">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th class="num">Last</th>
+              <th class="num">EMAf</th>
+              <th class="num">EMAs</th>
+              <th class="num">RSI14</th>
+              <th class="num">VWAP ({{ thresholds.VWAP_WINDOW_SEC|default(60) }}s)</th>
+              <th class="num">ATR ({{ thresholds.ATR_WINDOW_SEC|default(60) }}s)</th>
+              <th class="num">Tick/s</th>
+              <th class="num">Spread bps</th>
+              <th class="num">BuyPress</th>
+              <th class="num">Imb</th>
+              <th class="num">Rules</th>
+            </tr>
+          </thead>
+          <tbody id="signalsTBody">
+            <tr><td class="muted" colspan="13">Yükleniyor…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <details style="margin-top:10px">
+        <summary class="muted">Ham JSON’u göster</summary>
+        <pre id="signalsBox" style="margin-top:8px">Yükleniyor…</pre>
+      </details>
     </div>
   </div>
 
@@ -157,6 +201,18 @@
     return d.toLocaleString('tr-TR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
   };
   const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
+
+  // thresholdlar (jinja ile geldi; gelmezse defaultlar)
+  const TH = {
+    MIN_TICKS_PER_SEC: {{ thresholds.MIN_TICKS_PER_SEC|default(1.0) }},
+    MAX_SPREAD_BPS: {{ thresholds.MAX_SPREAD_BPS|default(5) }},
+    BUY_PRESSURE_MIN: {{ thresholds.BUY_PRESSURE_MIN|default(0.55) }},
+    IMB_THRESHOLD: {{ thresholds.IMB_THRESHOLD|default(0.9) }},
+    ATR_MIN: {{ thresholds.ATR_MIN|default(0.0002) }},
+    ATR_MAX: {{ thresholds.ATR_MAX|default(0.05) }},
+    VWAP_WINDOW_SEC: {{ thresholds.VWAP_WINDOW_SEC|default(60) }},
+    ATR_WINDOW_SEC: {{ thresholds.ATR_WINDOW_SEC|default(60) }},
+  };
 
   // ---------- header badges ----------
   async function loadHealth(){
@@ -211,12 +267,67 @@
     }
   }
 
-  // ---------- signals ----------
+  // ---------- signals (tablo + ham JSON) ----------
+  function decideSide(row){
+    const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s, rsi=row.rsi14;
+    if([ef,es,bp].some(v=>v==null)) return null;
+    if(ef>es && bp>=TH.BUY_PRESSURE_MIN && (rsi==null || rsi<70)) return 'long';
+    if(ef<es && bp<=1-TH.BUY_PRESSURE_MIN && (rsi==null || rsi>30)) return 'short';
+    return null;
+  }
+  function cls(ok){ return ok ? 'ok' : 'bad'; }
+  function f2(x){ return (x==null||isNaN(x)) ? '—' : Number(x).toFixed(2); }
+  function f4(x){ return (x==null||isNaN(x)) ? '—' : Number(x).toFixed(4); }
+
   async function loadSignals(){
     try{
-      const r = await fetch('/signals',{cache:'no-store'}); const j = await r.json();
-      document.getElementById('signalsBox').textContent = JSON.stringify(j,null,2);
+      const r = await fetch('/signals',{cache:'no-store'});
+      const sigs = await r.json();
+      renderSignalsTable(sigs);
+      document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);
     }catch{ document.getElementById('signalsBox').textContent = 'Yüklenemedi.'; }
+  }
+
+  function renderSignalsTable(sigs){
+    const tb = document.getElementById('signalsTBody');
+    tb.innerHTML = '';
+    const entries = Object.entries(sigs||{});
+    if(entries.length===0){ tb.innerHTML = '<tr><td class="muted" colspan="13">Veri yok.</td></tr>'; return; }
+
+    for(const [sym, s] of entries){
+      const side = decideSide(s);
+      const vwap = s.vwap60, lp = s.last_price;
+      const vwapDev = (vwap && lp) ? Math.abs(lp - vwap)/vwap : null;
+
+      const pass = {
+        tick: (s.tick_rate_2s??0) >= TH.MIN_TICKS_PER_SEC,
+        spread: (s.spread_bps??Infinity) <= TH.MAX_SPREAD_BPS,
+        atr: (s.atr60!=null) && s.atr60 >= TH.ATR_MIN && s.atr60 <= TH.ATR_MAX,
+        vwapDev: (vwapDev==null) ? false : (vwapDev <= 0.002),
+        bp: (s.buy_pressure_2s!=null) && (s.buy_pressure_2s >= TH.BUY_PRESSURE_MIN),
+        imb: (s.imbalance!=null) && (s.imbalance >= TH.IMB_THRESHOLD),
+        rsiCap: (s.rsi14==null) ? true : (s.rsi14 < 70)
+      };
+      const rulesOK = pass.tick && pass.spread && pass.atr && pass.vwapDev && pass.bp && pass.imb && pass.rsiCap;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><span class="chip">${sym}</span></td>
+        <td class="mono ${ side?'ok':'muted' }">${ side ?? '—' }</td>
+        <td class="num">${ f2(s.last_price) }</td>
+        <td class="num">${ f2(s.ema_fast) }</td>
+        <td class="num">${ f2(s.ema_slow) }</td>
+        <td class="num ${(s.rsi14!=null && (s.rsi14<30 || s.rsi14>70)) ? 'warn' : ''}">${ f2(s.rsi14) }</td>
+        <td class="num">${ f2(s.vwap60) } ${ vwapDev!=null ? `<span class="${cls(pass.vwapDev)}">(${(vwapDev*100).toFixed(2)}%)</span>` : '' }</td>
+        <td class="num ${cls(pass.atr)}">${ f4(s.atr60) }</td>
+        <td class="num ${cls(pass.tick)}">${ f2(s.tick_rate_2s) }</td>
+        <td class="num ${cls(pass.spread)}">${ f4(s.spread_bps) }</td>
+        <td class="num ${cls(pass.bp)}">${ s.buy_pressure_2s==null?'—':f2(s.buy_pressure_2s) }</td>
+        <td class="num ${cls(pass.imb)}">${ s.imbalance==null?'—':f2(s.imbalance) }</td>
+        <td class="mono ${ rulesOK ? 'ok' : 'bad' }">${ rulesOK ? 'OK' : 'FAIL' }</td>
+      `;
+      tb.appendChild(tr);
+    }
   }
 
   // ---------- history ----------
@@ -295,7 +406,7 @@
   loadHealth();
   loadPositions(); loadSignals(); loadHistory();
   setInterval(loadPositions, 2000);
-  setInterval(loadSignals, 4000);
+  setInterval(loadSignals, 2000);
   setInterval(loadHistory, 10000);
 </script>
 </body>
