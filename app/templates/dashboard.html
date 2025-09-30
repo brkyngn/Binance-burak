@@ -43,6 +43,10 @@
       <th class="num">TP $</th>
       <th class="num">SL $</th>
       <th class="num">PnL $</th>
+      <th class="num">Lev.</th>
+      <th class="num">Margin $</th>
+      <th class="num">Notional $</th>
+      <th class="num">Liq. Price</th>
       <th>Opened At</th>
     </tr>
   </table>
@@ -116,6 +120,10 @@ async function refresh(){
         <td class="num">${v.tp != null ? fmt2(tp$) : '-'}</td>
         <td class="num">${v.stop != null ? fmt2(sl$) : '-'}</td>
         <td class="num ${pnl$>=0?'pos':'neg'}">${fmt4(pnl$)}</td>
+        <td class="num">${v.leverage ?? 1}</td>
+        <td class="num">${fmt2(v.margin_usd ?? 0)}</td>
+        <td class="num">${fmt2(v.notional_usd ?? 0)}</td>
+        <td class="num">${v.liq_price != null ? fmt2(v.liq_price) : '-'}</td>
         <td>${opened}</td>
       </tr>`;
     }
