@@ -134,29 +134,44 @@ class BinanceWSClient:
         if sym in self.paper.positions:
             return
 
-        # Kaldıraç/marj → qty
-        lev = settings.LEVERAGE
-        margin = settings.MARGIN_PER_TRADE
-        notional = margin * lev
-        qty = max(1e-8, round(notional / price, 6))
+        # ---- Otomatik işlem: 10x kaldıraç, 1.000$ marjin = 10.000$ notional ----
+        notional = float(settings.AUTO_NOTIONAL_USD)              # 10,000
+        lev      = int(settings.AUTO_LEVERAGE)                    # 10x
+        margin   = float(settings.AUTO_MARGIN_USD)                # 1,000
+        qty      = max(1e-8, round(notional / price, 6))          # miktar = notional / entry
 
-        # TP / SL
+        # ---- Mutlak dolar hedeflerine göre TP/SL fiyatı (±50$) ----
+        # Long: TP = entry + (TP$ / qty),  SL = entry - (SL$ / qty)
+        # Short: TP = entry - (TP$ / qty), SL = entry + (SL$ / qty)
+        tp_d = float(settings.AUTO_ABS_TP_USD)                    # 50$
+        sl_d = float(settings.AUTO_ABS_SL_USD)                    # 50$
+        delta_tp = tp_d / qty
+        delta_sl = sl_d / qty
+
         if side == "long":
-            tp = price * (1 + settings.AUTO_TP_PCT)
-            sl = price * (1 - settings.AUTO_SL_PCT)
-        else:
-            tp = price * (1 - settings.AUTO_TP_PCT)
-            sl = price * (1 + settings.AUTO_SL_PCT)
+            tp = price + delta_tp
+            sl = price - delta_sl
+        else:  # short
+            tp = price - delta_tp
+            sl = price + delta_sl
 
         try:
             self.paper.open(
-                sym, side, qty, price, sl, tp,
-                leverage=lev, margin_usd=margin, maint_margin_rate=settings.MAINT_MARGIN_RATE
+                sym,
+                side,
+                qty=qty,
+                price=price,
+                stop=sl,
+                tp=tp,
+                leverage=lev,
+                margin_usd=margin,
+                notional_usd=notional,
+                maint_margin_rate=settings.MAINT_MARGIN_RATE,
             )
             self.signal_cooldown[sym] = ts
             logger.info(
-                "AUTO-OPEN %s %s qty=%s entry=%.2f lev=%dx margin=$%.2f notional=$%.2f tp=%.2f sl=%.2f",
-                sym, side, qty, price, lev, margin, notional, tp, sl
+                "AUTO-OPEN %s %s qty=%s entry=%.2f lev=%dx margin=$%.2f notional=$%.2f tp=%.2f sl=%.2f (±$%.2f)",
+                sym, side, qty, price, lev, margin, notional, tp, sl, tp_d
             )
         except Exception as e:
             logger.warning("AUTO-OPEN failed %s: %s", sym, e)
