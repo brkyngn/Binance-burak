@@ -64,7 +64,16 @@ async def signals():
 
 @app.get("/paper/positions")
 async def paper_positions():
-    return JSONResponse(client.paper.snapshot())
+    # Market state'ten sembol -> last_price haritası çıkar
+    snap = client.state.snapshot()  # {"BTCUSDT": {"last_price": ...}, ...}
+    last_map = {sym: (vals.get("last_price") if isinstance(vals, dict) else None)
+                for sym, vals in snap.items()}
+
+    # Paper trader'a son fiyatları geçirerek pozisyonları listele
+    rows = client.paper.snapshot(last_map)  # list[dict]: symbol, side, qty, entry, last_price, pnl, ...
+
+    # UI array'i doğrudan okuyabiliyor; basitçe liste dön
+    return JSONResponse(rows)
 
 # ------ MANUEL ORDER / CLOSE ------
 @app.post("/paper/order")
