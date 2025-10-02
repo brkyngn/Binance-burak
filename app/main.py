@@ -1,5 +1,5 @@
+# app/main.py
 import asyncio
-import os
 from fastapi import FastAPI, Body, Request
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
@@ -9,6 +9,11 @@ from .config import settings
 from .logger import logger
 from .db import init_pool, fetch_recent
 
+# clear endpoint'i opsiyonel: db.py'de varsa kullan
+try:
+    from .db import clear_history  # async bir fonksiyon olduğunu varsayıyoruz
+except Exception:  # ImportError vs.
+    clear_history = None  # yoksa None olsun
 
 # -----------------------------
 # FastAPI app & templates
@@ -33,8 +38,10 @@ async def root():
 # -----------------------------
 @app.on_event("startup")
 async def _startup():
-    logger.info("Starting Binance WS consumer… symbols=%s stream=%s",
-                settings.SYMBOLS, settings.STREAM)
+    logger.info(
+        "Starting Binance WS consumer… symbols=%s stream=%s",
+        settings.SYMBOLS, settings.STREAM
+    )
     if settings.DATABASE_URL:
         await init_pool()
     app.state.task = asyncio.create_task(client.run())
@@ -52,7 +59,11 @@ async def _shutdown():
 # -----------------------------
 @app.get("/healthz")
 async def healthz():
-    return JSONResponse({"ok": True, "symbols": settings.SYMBOLS, "stream": settings.STREAM})
+    return JSONResponse({
+        "ok": True,
+        "symbols": settings.SYMBOLS,
+        "stream": settings.STREAM
+    })
 
 @app.get("/stats")
 async def stats():
@@ -60,19 +71,22 @@ async def stats():
 
 @app.get("/signals")
 async def signals():
+    # client.get_signals() artık genişletilmiş alanları (vwap_dev_pct, atr60, cvd_10m, vol_spike_5s,
+    # sr_dist_pct, candle5_dir, short_vwap_band_ok vs.) döndürüyor.
     return JSONResponse(client.get_signals())
 
 @app.get("/paper/positions")
 async def paper_positions():
-    # Market state'ten sembol -> last_price haritası çıkar
+    """
+    Dashboard, /paper/positions'tan ARRAY bekliyor.
+    PaperBroker.snapshot(last_price_map) bu listeyi döndürüyor.
+    """
     snap = client.state.snapshot()  # {"BTCUSDT": {"last_price": ...}, ...}
-    last_map = {sym: (vals.get("last_price") if isinstance(vals, dict) else None)
-                for sym, vals in snap.items()}
-
-    # Paper trader'a son fiyatları geçirerek pozisyonları listele
-    rows = client.paper.snapshot(last_map)  # list[dict]: symbol, side, qty, entry, last_price, pnl, ...
-
-    # UI array'i doğrudan okuyabiliyor; basitçe liste dön
+    last_map = {
+        sym: (vals.get("last_price") if isinstance(vals, dict) else None)
+        for sym, vals in snap.items()
+    }
+    rows = client.paper.snapshot(last_map)  # list[dict]
     return JSONResponse(rows)
 
 # ------ MANUEL ORDER / CLOSE ------
@@ -83,22 +97,22 @@ async def paper_order(
     qty: float | None = Body(None, embed=True),          # opsiyonel; margin varsa otomatik hesaplanır
     stop: float | None = Body(None, embed=True),
     tp: float | None = Body(None, embed=True),
-    leverage: int | None = Body(None, embed=True),       # yeni: kaldıraç
-    margin_usd: float | None = Body(None, embed=True),   # yeni: marj ($)
+    leverage: int | None = Body(None, embed=True),       # kaldıraç
+    margin_usd: float | None = Body(None, embed=True),   # marjin ($)
 ):
     snap = client.state.snapshot().get(symbol.upper())
-    if not snap or snap["last_price"] is None:
+    if not snap or snap.get("last_price") is None:
         return JSONResponse({"ok": False, "error": "No last price yet"}, status_code=400)
     price = float(snap["last_price"])
 
-    # Varsayılanları settings’ten al
-    lev = leverage if leverage is not None else settings.LEVERAGE
-    margin = margin_usd if margin_usd is not None else settings.MARGIN_PER_TRADE
+    # Varsayılanlar
+    lev = leverage if leverage is not None else getattr(settings, "LEVERAGE", None)
+    margin = margin_usd if margin_usd is not None else getattr(settings, "MARGIN_PER_TRADE", None)
 
-    # qty hesabı: margin*leverage / price (margin+lev varsa)
+    # qty hesabı: margin * leverage / price (margin+lev varsa)
     eff_qty = qty
     if eff_qty is None and margin is not None and lev is not None:
-        eff_qty = round((margin * lev) / price, 6)
+        eff_qty = round((float(margin) * int(lev)) / price, 6)
 
     if eff_qty is None or eff_qty <= 0:
         return JSONResponse(
@@ -111,28 +125,58 @@ async def paper_order(
             symbol.upper(), side, eff_qty, price, stop, tp,
             leverage=lev, margin_usd=margin, maint_margin_rate=settings.MAINT_MARGIN_RATE
         )
-        return JSONResponse({"ok": True, "opened": {
-            "symbol": pos.symbol,
-            "side": pos.side,
-            "entry": pos.entry,
-            "qty": pos.qty,
-            "leverage": pos.leverage,
-            "margin_usd": pos.margin_usd
-        }})
+        return JSONResponse({
+            "ok": True,
+            "opened": {
+                "symbol": pos.symbol,
+                "side": pos.side,
+                "entry": pos.entry,
+                "qty": pos.qty,
+                "leverage": pos.leverage,
+                "margin_usd": pos.margin_usd
+            }
+        })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
+# ✅ Yalnızca **fee'li** /paper/close endpoint'i (çift tanımı kaldırıldı)
 @app.post("/paper/close")
 async def paper_close(symbol: str = Body(..., embed=True)):
-    snap = client.state.snapshot().get(symbol.upper())
-    if not snap or snap["last_price"] is None:
+    # En güncel fiyatı al
+    snap_all = client.state.snapshot()
+    snap = snap_all.get(symbol.upper())
+    if not snap or snap.get("last_price") is None:
         return JSONResponse({"ok": False, "error": "No last price yet"}, status_code=400)
     price = float(snap["last_price"])
+
+    # Opsiyonel: BNB fiyatı (BNB ile fee simülasyonu varsa)
+    bnb_px = None
+    bnb_snap = snap_all.get("BNBUSDT") or snap_all.get("BNBUSD") or snap_all.get("BNBUSDT_PERP")
+    if bnb_snap and bnb_snap.get("last_price") is not None:
+        try:
+            bnb_px = float(bnb_snap["last_price"])
+        except Exception:
+            bnb_px = None
+
     try:
-        pos = client.paper.close(symbol.upper(), price)
-        return JSONResponse({"ok": True, "closed": {
-            "symbol": pos.symbol, "pnl": pos.pnl, "exit": pos.exit_price
-        }})
+        # PaperBroker.close(..., bnb_usd_price=...) yeni imzaya uyumlu
+        pos = client.paper.close(symbol.upper(), price, bnb_usd_price=bnb_px)
+        return JSONResponse({
+            "ok": True,
+            "closed": {
+                "symbol": pos.symbol,
+                "pnl": pos.pnl,                      # ham PnL (feesiz)
+                "exit": pos.exit_price,
+                "fee_open_usd": getattr(pos, "fee_open_usd", None),
+                "fee_close_usd": getattr(pos, "fee_close_usd", None),
+                "fee_total_usd": getattr(pos, "fee_total_usd", None),
+                "fee_currency": getattr(pos, "fee_currency", None),
+                "fee_open_bnb": getattr(pos, "fee_open_bnb", None),
+                "fee_close_bnb": getattr(pos, "fee_close_bnb", None),
+                "fee_total_bnb": getattr(pos, "fee_total_bnb", None),
+                "net_pnl": (pos.pnl - getattr(pos, "fee_total_usd", 0.0))
+            }
+        })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
@@ -144,47 +188,26 @@ async def history(limit: int = 50):
         rows = await fetch_recent(limit=limit)
         return JSONResponse({"ok": True, "rows": rows})
     except Exception as e:
-        # burada hata mesajını döndürerek hızlı teşhis yaparız
         logger.exception("history error: %s", e)
-        return JSONResponse({"ok": False, "error": f"history_failed: {type(e).__name__}: {e}"}, status_code=500)
+        return JSONResponse(
+            {"ok": False, "error": f"history_failed: {type(e).__name__}: {e}"},
+            status_code=500
+        )
 
-@app.post("/paper/close")
-async def paper_close(symbol: str = Body(..., embed=True)):
-    snap_all = client.state.snapshot()
-    snap = snap_all.get(symbol.upper())
-
-    if not snap or snap["last_price"] is None:
-        return JSONResponse({"ok": False, "error": "No last price yet"}, status_code=400)
-
-    price = float(snap["last_price"])
-
-    # BNB fiyatı (opsiyonel)
-    bnb_px = None
-    bnb_snap = snap_all.get("BNBUSDT") or snap_all.get("BNBUSD") or snap_all.get("BNBUSDT_PERP")
-    if bnb_snap and bnb_snap.get("last_price") is not None:
-        try:
-            bnb_px = float(bnb_snap["last_price"])
-        except Exception:
-            bnb_px = None
-
+# (Opsiyonel) History clear – db.clear_history varsa çalışır
+@app.post("/history/clear")
+async def history_clear():
+    if not settings.DATABASE_URL:
+        return JSONResponse({"ok": False, "error": "DATABASE_URL not set"}, status_code=400)
+    if clear_history is None:
+        # db.py içinde clear_history yoksa kibarca bildir
+        return JSONResponse({"ok": False, "error": "clear_history_not_implemented"}, status_code=501)
     try:
-        pos = client.paper.close(symbol.upper(), price, bnb_usd_price=bnb_px)
-        # JSON cevabına fee alanlarını da ekleyelim
-        return JSONResponse({"ok": True, "closed": {
-            "symbol": pos.symbol,
-            "pnl": pos.pnl,                      # ham
-            "exit": pos.exit_price,
-            "fee_open_usd": pos.fee_open_usd,
-            "fee_close_usd": pos.fee_close_usd,
-            "fee_total_usd": pos.fee_total_usd,
-            "fee_currency": pos.fee_currency,
-            "fee_open_bnb": pos.fee_open_bnb,
-            "fee_close_bnb": pos.fee_close_bnb,
-            "fee_total_bnb": pos.fee_total_bnb,
-            "net_pnl": pos.pnl - pos.fee_total_usd
-        }})
+        await clear_history()
+        return JSONResponse({"ok": True})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        logger.exception("history clear error: %s", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 # -----------------------------
 # Dashboard Page
@@ -206,6 +229,6 @@ async def dashboard(request: Request):
         {
             "request": request,
             "thresholds": thresholds,
-            "fee_rate": settings.FEE_RATE,   # 👈 EK
+            "fee_rate": settings.FEE_RATE,  # dashboard js FEE_RATE kullanıyor
         }
     )
