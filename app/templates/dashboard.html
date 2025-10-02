@@ -17,7 +17,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 .hint{color:var(--muted);font-size:12px}
 .table-responsive{overflow:auto}
 .table-compact{width:100%;border-collapse:separate;border-spacing:0}
-.table-compact th,.table-compact td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+.table-compact th,.table-compact td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
 .table-compact thead th{position:sticky;top:0;background:#0f1626;z-index:1}
 .table-compact tr:hover td{background:#0f172a}
 .num{text-align:right}
@@ -112,7 +112,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
           <th class="num">Qty</th><th class="num">Entry</th><th class="num">Liq</th><th class="num">Last</th>
           <th class="num">PNL $</th><th class="num">Notional</th><th class="num">Lev</th><th></th>
         </tr></thead>
-        <tbody id="posBody"><tr><td class="muted" colspan="10">Bekleniyor…</td></tr></tbody>
+        <tbody id="posBody"><tr class="muted"><td colspan="10">Bekleniyor…</td></tr></tbody>
       </table>
     </div>
     <div class="hint" style="margin-top:8px">PnL $ = (Price-Entry)×Qty (long) / (Entry-Price)×Qty (short). Notional = Entry×Qty.</div>
@@ -124,25 +124,26 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
     <div class="hint" style="margin-bottom:8px">
       Tick/s ≥ <b>{{ thresholds.MIN_TICKS_PER_SEC|default(2.0) }}</b>, Spread bps ≤ <b>{{ thresholds.MAX_SPREAD_BPS|default(5) }}</b>,
       Buy/SellPress ≥ <b>{{ thresholds.BUY_PRESSURE_MIN|default(0.55) }}</b>,
-      Imbalance ≥ <b>{{ thresholds.IMB_THRESHOLD|default(0.9) }}</b>,
+      Imbalance long ≥ <b>1.25</b> / short ≤ <b>0.80</b>,
       ATR ∈ [<b>{{ thresholds.ATR_MIN|default(0.0002) }}</b>, <b>{{ thresholds.ATR_MAX|default(0.05) }}</b>],
-      VWAP sapma ≤ <b>0.20%</b>,
-      VolSpike > <b>1.5x</b>, CVD 10m uygun, Funding > <b>20dk</b>, Yakın S/R yok (±0.15%).
+      VWAP sapma ≤ <b>0.20%</b>, VolSpike > <b>1.5x</b>, Funding > <b>20dk</b>, Yakın S/R yok (±0.15%).
     </div>
     <div class="table-responsive">
       <table class="table-compact" style="width:100%">
-        <thead><tr>
-          <th>Time</th><th>Symbol</th><th>Signal</th>
-          <th class="num">Price</th><th class="num">EMAf</th><th class="num">EMAs</th><th class="num">RSI14</th>
-          <th class="num">VWAP (60s)</th><th class="num">ATR (60s)</th>
-          <th class="num">Tick/s</th><th class="num">Spread bps</th><th class="num">BuyPress</th><th class="num">Imb</th>
-          <th class="num">VolSpike</th><th class="num">CVD 10m</th><th>Funding>20m</th><th>Yakın S/R</th>
-          <th>Rules</th>
-        </tr></thead>
-        <tbody id="signalsTBody"><tr><td class="muted" colspan="18">Bekleniyor…</td></tr></tbody>
+        <thead>
+          <tr>
+            <th>Time</th><th>Symbol</th><th>Signal</th>
+            <th class="num">Price</th><th class="num">EMAf</th><th class="num">EMAs</th><th class="num">RSI14</th>
+            <th class="num">VWAP (60s)</th><th class="num">ATR (60s)</th>
+            <th class="num">Tick/s</th><th class="num">Spread bps</th><th class="num">Press</th><th class="num">Imb</th>
+            <th class="num">VolSpike</th><th class="num">CVD 10m</th><th>Funding&gt;20m</th><th>Yakın S/R</th>
+            <th>Rules</th>
+          </tr>
+        </thead>
+        <tbody id="signalsTBody"><tr class="muted"><td colspan="18">Bekleniyor…</td></tr></tbody>
       </table>
     </div>
-    <details style="margin-top:10px"><summary>Ham JSON</summary>
+    <details id="signalsDetails" style="margin-top:10px"><summary>Ham JSON</summary>
       <pre id="signalsBox" class="mono code" style="max-height:280px;overflow:auto;margin-top:8px">—</pre>
     </details>
   </div>
@@ -180,14 +181,12 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
         <thead><tr>
           <th>Symbol</th><th>Side</th>
           <th class="num">Qty</th><th class="num">Entry</th><th class="num">Exit</th>
-          <th class="num">PNL</th>
-          <th class="num">Fee (USD)</th>
-          <th class="num">Net PNL</th>
+          <th class="num">PNL</th><th class="num">Fee (USD)</th><th class="num">Net PNL</th>
           <th class="num">Lev</th><th class="num">Margin</th>
           <th class="num">Notional</th><th class="num">Liq</th>
           <th class="num">Opened</th><th class="num">Closed</th>
         </tr></thead>
-        <tbody id="histBody"><tr><td class="muted" colspan="12">Bekleniyor…</td></tr></tbody>
+        <tbody id="histBody"><tr class="muted"><td colspan="14">Bekleniyor…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -196,35 +195,38 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter, ui-sans-
 <div id="toast" class="toast">—</div>
 
 <script>
-let lastPrices = {};   // signals'tan canlı fiyat cache'i
+/*** ---------- GLOBAL STATE & CONFIG ---------- ***/
+let lastPrices = {};               // canlı fiyat cache (signals'tan)
+let currentSymbols = [];           // healthz -> symbols
+let signalsRowCache = new Map();   // symbol -> <tr>
+let positionsRowCache = new Map(); // symbol -> <tr>
+let historyLastHash = "";          // gereksiz render önleme
+let signalsLastHash = "";          // gereksiz render önleme
+let dbgSignalsTick = 0;
 
-// ---------- Helpers ----------
+let ctrlSignals = null, ctrlPositions = null, ctrlHistory = null;
+
 const fmt2 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(2);
 const fmt4 = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(4);
 const fmtQ = v => (v==null||Number.isNaN(v))?'-':Number(v).toFixed(6);
 const clsP = v => (v||0) >= 0 ? 'pnl-pos' : 'pnl-neg';
-function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>el.classList.remove('show'), 2200); }
+function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>el.classList.remove('show'), 1800); }
 function setSymbol(sym){ const el=document.getElementById('symbolInput'); el.value=sym; toast(`Symbol: ${sym}`); }
 
 const TH = {
   MIN_TICKS_PER_SEC: {{ thresholds.MIN_TICKS_PER_SEC|default(2.0) }},
   MAX_SPREAD_BPS: {{ thresholds.MAX_SPREAD_BPS|default(5) }},
   BUY_PRESSURE_MIN: {{ thresholds.BUY_PRESSURE_MIN|default(0.55) }},
-  IMB_LONG_MIN: 1.25,           // long için öneri
-  IMB_SHORT_MAX: 0.80,          // short için öneri
+  IMB_LONG_MIN: 1.25,
+  IMB_SHORT_MAX: 0.80,
   ATR_MIN: {{ thresholds.ATR_MIN|default(0.0002) }},
   ATR_MAX: {{ thresholds.ATR_MAX|default(0.05) }},
-  VWAP_DEV_MAX: 0.002,          // 0.20%
+  VWAP_DEV_MAX: 0.002,
   VOL_SPIKE_MIN: 1.5,
-  FUNDING_MIN_MIN: 20,          // dakika
+  FUNDING_MIN_MIN: 20,
 };
-// Fee oranı (backend template paramı verilmezse 0.0004)
 const FEE_RATE = {{ fee_rate|default(0.0004) }};
 
-// ---- Global state
-let currentSymbols = [];
-
-// key picker
 const pick = (o, ...keys) => {
   for (const k of keys) {
     if (o==null) continue;
@@ -237,7 +239,6 @@ const pick = (o, ...keys) => {
   return undefined;
 };
 
-// helpers
 function extractArray(j, preferredKeys=[]){
   if (Array.isArray(j)) return j;
   if (j && typeof j==='object'){
@@ -251,11 +252,10 @@ function mapToArrayBySymbol(obj){
   return Object.entries(obj).map(([symbol, payload]) => ({ symbol, ...(payload||{}) }));
 }
 
-// ---- Fee & Net PnL yardımcıları ----
 function safeNum(x){ const n = Number(x); return Number.isFinite(n) ? n : 0; }
 function estimateFeeUSD(row){
   if (row.fee_total_usd!=null && !Number.isNaN(row.fee_total_usd)) return Number(row.fee_total_usd);
-  const qty   = safeNum(row.qty);
+  const qty = safeNum(row.qty);
   const openN = safeNum(row.entry) * qty;
   const closeN= safeNum(row.exit)  * qty;
   return (openN + closeN) * FEE_RATE;
@@ -266,7 +266,7 @@ function netPnlUSD(row){
   return pnl - estimateFeeUSD(row);
 }
 
-// --------- Normalizers ----------
+/*** ---------- NORMALIZERS ---------- ***/
 function normalizePosition(p){
   return {
     symbol: pick(p,'symbol'),
@@ -308,15 +308,14 @@ function normalizeSignal(s){
   const tps = Number(pick(s,'tick_rate_2s','tick_rate','ticks_per_sec'));
   const spr = Number(pick(s,'spread_bps','spread'));
   const bp  = Number(pick(s,'buy_pressure_2s','buy_pressure','bp'));
-  const sp  = Number(pick(s,'sell_pressure_2s','sell_pressure')); // opsiyonel
+  const sp  = Number(pick(s,'sell_pressure_2s','sell_pressure'));
   const imb = Number(pick(s,'imbalance','imb'));
   const symbol = pick(s,'symbol');
   const ts = pick(s,'ts','time','timestamp','last_ts');
-  const volSpike = Number(pick(s,'volume_spike'));
+  const volSpike = Number(pick(s,'vol_spike_5s','volume_spike'));
   const cvd10 = Number(pick(s,'cvd_10m','cvd10m','cvd10'));
   const fundingGap = Number(pick(s,'funding_gap_min','funding_min','fundingGapMin'));
   const srFlag = !!pick(s,'nearby_sr_flag','nearbySR','nearby_sr');
-
   return {
     ts, symbol,
     last_price:lp, vwap60:vwap,
@@ -325,11 +324,11 @@ function normalizeSignal(s){
     buy_pressure_2s:bp, sell_pressure_2s:sp,
     imbalance:imb,
     volume_spike:volSpike, cvd_10m:cvd10, funding_gap_min:fundingGap, nearby_sr_flag:srFlag,
-    side: pick(s,'side') // backend bir karar döndürüyorsa gösteriyoruz
+    side: pick(s,'side')
   };
 }
 
-// --------- Signals decision + render ----------
+/*** ---------- SIGNAL RULES ---------- ***/
 function sideClass(side){ if(!side) return 'sig-raw'; return side==='long'?'sig-long':(side==='short'?'sig-short':'sig-raw'); }
 function sideLabel(side){ return side? side.toUpperCase() : 'RAW'; }
 function ruleBadge(status){
@@ -338,21 +337,19 @@ function ruleBadge(status){
 }
 function asPct(x,d=1){ return (x==null)?'-':(x*100).toFixed(d)+'%'; }
 
-// Long/Short taraflı kurallar (önerdiğin koşulları sadeleştirilmiş kontrol)
 function evalRules(row){
-  const lp=row.last_price, vwap=row.vwap60;
-  const vwapDev = (vwap&&lp)?Math.abs(lp-vwap)/vwap:null;
+  const lp=row.last_price, v=row.vwap60;
+  const vDev = (v&&lp)?Math.abs(lp-v)/v:null;
 
   const baseOk =
     (row.tick_rate_2s??0) >= TH.MIN_TICKS_PER_SEC &&
     (row.spread_bps??Infinity) <= TH.MAX_SPREAD_BPS &&
     (row.atr60!=null && row.atr60>=TH.ATR_MIN && row.atr60<=TH.ATR_MAX) &&
-    (vwapDev!=null && vwapDev<=TH.VWAP_DEV_MAX) &&
+    (vDev!=null && vDev<=TH.VWAP_DEV_MAX) &&
     (row.volume_spike!=null && row.volume_spike>TH.VOL_SPIKE_MIN) &&
     (row.funding_gap_min!=null && row.funding_gap_min>TH.FUNDING_MIN_MIN) &&
     (row.nearby_sr_flag===false);
 
-  // taraf belirleme (varsa backend side, yoksa EMA + pressure)
   let side = row.side;
   if(!side){
     const ef=row.ema_fast, es=row.ema_slow, bp=row.buy_pressure_2s;
@@ -375,8 +372,7 @@ function evalRules(row){
     const imbOk   = (row.imbalance!=null && row.imbalance<=TH.IMB_SHORT_MAX);
     const cvdOk   = (row.cvd_10m!=null && row.cvd_10m<0);
     specificOk = pressOk && imbOk && cvdOk;
-  }else{
-    // tarafsızsa sadece base kuralları uyarı olarak değerlendirelim
+  } else {
     specificOk = false;
   }
 
@@ -385,72 +381,204 @@ function evalRules(row){
   return {side, pass, warn};
 }
 
-function renderSignalsTable(sigs){
+/*** ---------- RENDER HELPERS (PATCH) ---------- ***/
+function ensureSignalsHeaderCleared(){
   const tb=document.getElementById('signalsTBody');
-  tb.innerHTML='';
-  if(!Array.isArray(sigs)||sigs.length===0){
-    tb.innerHTML = `<tr><td class="muted" colspan="18">Kayıt yok.</td></tr>`; return;
+  if (tb && tb.firstElementChild && tb.firstElementChild.classList.contains('muted')) {
+    tb.innerHTML = '';
   }
-  for(const s of sigs){
-    const {side, pass, warn} = evalRules(s);
-    const sideTxt = sideLabel(side);
-    const sideCls = sideClass(side);
-    const lp=s.last_price, vwap=s.vwap60;
-    const vwapDev=(vwap&&lp)?Math.abs(lp - vwap)/vwap:null;
+}
+function upsertSignalRow(s){
+  const tb=document.getElementById('signalsTBody');
+  ensureSignalsHeaderCleared();
+  let tr = signalsRowCache.get(s.symbol);
+  const {side, pass, warn} = evalRules(s);
+  const sideTxt = sideLabel(side);
+  const sideCls = sideClass(side);
+  const lp=s.last_price, v=s.vwap60;
+  const vDev=(v&&lp)?Math.abs(lp - v)/v:null;
 
-    const tickCls=((s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC)?'ok':'bad';
-    const sprdCls=((s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS)?'ok':'bad';
-    const atrCls=(s.atr60!=null && s.atr60>=TH.ATR_MIN && s.atr60<=TH.ATR_MAX)?'ok':'bad';
-    const vwapCls=(vwapDev!=null)?(vwapDev<=TH.VWAP_DEV_MAX?'ok':'bad'):'';
-    const press = (side==='short')
+  const tickOk=((s.tick_rate_2s??0)>=TH.MIN_TICKS_PER_SEC);
+  const sprdOk=((s.spread_bps??Infinity)<=TH.MAX_SPREAD_BPS);
+  const atrOk=(s.atr60!=null && s.atr60>=TH.ATR_MIN && s.atr60<=TH.ATR_MAX);
+  const vwapOk=(vDev!=null && vDev<=TH.VWAP_DEV_MAX);
+  const press = (side==='short')
       ? (s.sell_pressure_2s!=null ? s.sell_pressure_2s : (s.buy_pressure_2s!=null ? 1-s.buy_pressure_2s : null))
       : s.buy_pressure_2s;
-    const pressCls=(press==null)?'':(press>=0.55?'ok':(press>=0.50?'warn':'bad'));
+  const pressCls=(press==null)?'':(press>=0.55?'ok':(press>=0.50?'warn':'bad'));
 
-    const imbCls=(side==='short')
+  const imbCls=(side==='short')
       ? (s.imbalance!=null ? (s.imbalance<=TH.IMB_SHORT_MAX?'ok':'bad') : '')
       : (s.imbalance!=null ? (s.imbalance>=TH.IMB_LONG_MIN?'ok':'bad') : '');
 
-    const volCls=(s.volume_spike!=null)?(s.volume_spike>TH.VOL_SPIKE_MIN?'ok':'bad'):'';
-    const cvdCls=(s.cvd_10m!=null)?((side==='short')?(s.cvd_10m<0?'ok':'bad'):(s.cvd_10m>0?'ok':'bad')):'';
-    const fundOk=(s.funding_gap_min!=null && s.funding_gap_min>TH.FUNDING_MIN_MIN);
-    const srOk=(s.nearby_sr_flag===false);
+  const volCls=(s.volume_spike!=null)?(s.volume_spike>TH.VOL_SPIKE_MIN?'ok':'bad'):'';
+  const cvdCls=(s.cvd_10m!=null)?((side==='short')?(s.cvd_10m<0?'ok':'bad'):(s.cvd_10m>0?'ok':'bad')):'';
+  const fundOk=(s.funding_gap_min!=null && s.funding_gap_min>TH.FUNDING_MIN_MIN);
+  const srOk=(s.nearby_sr_flag===false);
+  const rulePill = pass?ruleBadge('pass'):(warn?ruleBadge('warn'):ruleBadge('fail'));
+  const pressVal = press!=null ? asPct(press,1) : '-';
 
-    const rulePill = pass?ruleBadge('pass'):(warn?ruleBadge('warn'):ruleBadge('fail'));
-
-    const pressVal = press!=null ? asPct(press,1) : '-';
-
-    const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td>${s.ts || '-'}</td>
-      <td>${s.symbol || '-'}</td>
-      <td><span class="${sideCls}">${sideTxt}</span></td>
-      <td class="num mono">${lp!=null ? fmt4(lp) : '-'}</td>
-      <td class="num mono">${s.ema_fast!=null ? fmt4(s.ema_fast) : '-'}</td>
-      <td class="num mono">${s.ema_slow!=null ? fmt4(s.ema_slow) : '-'}</td>
-      <td class="num mono">${s.rsi14!=null ? fmt2(s.rsi14) : '-'}</td>
-      <td class="num mono ${vwapCls}">${vwap!=null ? fmt4(vwap) : '-'}</td>
-      <td class="num mono ${atrCls}">${s.atr60!=null ? fmt4(s.atr60) : '-'}</td>
-      <td class="num mono ${tickCls}">${s.tick_rate_2s!=null ? fmt2(s.tick_rate_2s) : '-'}</td>
-      <td class="num mono ${sprdCls}">${s.spread_bps!=null ? fmt2(s.spread_bps) : '-'}</td>
-      <td class="num mono ${pressCls}">${pressVal}</td>
-      <td class="num mono ${imbCls}">${s.imbalance!=null ? fmt2(s.imbalance) : '-'}</td>
-      <td class="num mono ${volCls}">${s.volume_spike!=null ? fmt2(s.volume_spike) : '-'}</td>
-      <td class="num mono ${cvdCls}">${s.cvd_10m!=null ? fmt2(s.cvd_10m) : '-'}</td>
-      <td>${fundOk?'<span class="ok">OK</span>':'<span class="warn">YAKIN</span>'}</td>
-      <td>${srOk?'<span>YOK</span>':'<span class="warn">VAR</span>'}</td>
-      <td>${rulePill}</td>`;
+  if(!tr){
+    tr = document.createElement('tr');
+    tr.id = `sig-${s.symbol}`;
+    tr.innerHTML = `
+      <td data-f="ts"></td>
+      <td data-f="symbol"></td>
+      <td data-f="side"></td>
+      <td class="num mono" data-f="price"></td>
+      <td class="num mono" data-f="emaf"></td>
+      <td class="num mono" data-f="emas"></td>
+      <td class="num mono" data-f="rsi"></td>
+      <td class="num mono" data-f="vwap"></td>
+      <td class="num mono" data-f="atr"></td>
+      <td class="num mono" data-f="tick"></td>
+      <td class="num mono" data-f="sprd"></td>
+      <td class="num mono" data-f="press"></td>
+      <td class="num mono" data-f="imb"></td>
+      <td class="num mono" data-f="vol"></td>
+      <td class="num mono" data-f="cvd"></td>
+      <td data-f="fund"></td>
+      <td data-f="sr"></td>
+      <td data-f="rule"></td>`;
     tb.appendChild(tr);
+    signalsRowCache.set(s.symbol, tr);
+  }
+  const q=(k)=>tr.querySelector(`[data-f="${k}"]`);
+  q('ts').textContent = s.ts || '-';
+  q('symbol').textContent = s.symbol || '-';
+  q('side').innerHTML = `<span class="${sideCls}">${sideTxt}</span>`;
+  q('price').textContent = lp!=null ? fmt4(lp) : '-';
+  q('emaf').textContent = s.ema_fast!=null ? fmt4(s.ema_fast) : '-';
+  q('emas').textContent = s.ema_slow!=null ? fmt4(s.ema_slow) : '-';
+  q('rsi').textContent = s.rsi14!=null ? fmt2(s.rsi14) : '-';
+  q('vwap').textContent = v!=null ? fmt4(v) : '-';
+  q('atr').textContent = s.atr60!=null ? fmt4(s.atr60) : '-';
+  q('tick').textContent = s.tick_rate_2s!=null ? fmt2(s.tick_rate_2s) : '-';
+  q('sprd').textContent = s.spread_bps!=null ? fmt2(s.spread_bps) : '-';
+  q('press').textContent = pressVal;
+  q('imb').textContent = s.imbalance!=null ? fmt2(s.imbalance) : '-';
+  q('vol').textContent = s.volume_spike!=null ? fmt2(s.volume_spike) : '-';
+  q('cvd').textContent = s.cvd_10m!=null ? fmt2(s.cvd_10m) : '-';
+  q('fund').innerHTML = fundOk?'<span class="ok">OK</span>':'<span class="warn">YAKIN</span>';
+  q('sr').innerHTML = srOk?'<span>YOK</span>':'<span class="warn">VAR</span>';
+  q('rule').innerHTML = rulePill;
+
+  // sınıf patch
+  q('press').className = `num mono ${pressCls}`;
+  q('imb').className = `num mono ${imbCls}`;
+  q('tick').className = `num mono ${tickOk?'ok':'bad'}`;
+  q('sprd').className = `num mono ${sprdOk?'ok':'bad'}`;
+  q('atr').className  = `num mono ${atrOk?'ok':'bad'}`;
+  q('vwap').className = `num mono ${vwapOk?'ok':'bad'}`;
+}
+
+function ensurePositionsHeaderCleared(){
+  const tb=document.getElementById('posBody');
+  if (tb && tb.firstElementChild && tb.firstElementChild.classList.contains('muted')) {
+    tb.innerHTML = '';
+  }
+}
+function upsertPositionRow(p){
+  const tb=document.getElementById('posBody');
+  ensurePositionsHeaderCleared();
+  let tr = positionsRowCache.get(p.symbol);
+  if(!tr){
+    tr = document.createElement('tr');
+    tr.id = `pos-${p.symbol}`;
+    tr.innerHTML = `
+      <td data-f="symbol"></td>
+      <td data-f="side"></td>
+      <td class="num mono" data-f="qty"></td>
+      <td class="num mono" data-f="entry"></td>
+      <td class="num mono" data-f="liq"></td>
+      <td class="num mono" data-f="last"></td>
+      <td class="num mono" data-f="pnl"></td>
+      <td class="num mono" data-f="notional"></td>
+      <td class="num mono" data-f="lev"></td>
+      <td class="num" data-f="btn"></td>`;
+    tb.appendChild(tr);
+    positionsRowCache.set(p.symbol, tr);
+  }
+  const q=(k)=>tr.querySelector(`[data-f="${k}"]`);
+  q('symbol').textContent = p.symbol||'-';
+  q('side').textContent   = p.side||'-';
+  q('qty').textContent    = fmtQ(p.qty);
+  q('entry').textContent  = fmt4(p.entry);
+  q('liq').textContent    = fmt4(p.liq_price);
+  q('last').textContent   = fmt4(p.last_price);
+  q('pnl').textContent    = fmt2(p.pnl);
+  q('pnl').className      = `num mono ${clsP(p.pnl)}`;
+  q('notional').textContent = fmt2(p.notional_usd);
+  q('lev').textContent    = p.leverage||'-';
+  q('btn').innerHTML      = `<button class="btn" onclick="closeSymbol('${p.symbol}')">Close</button>`;
+}
+
+/*** ---------- LOADERS (with Abort + batching) ---------- ***/
+async function loadHealth(){
+  try{
+    const r = await fetch('/healthz',{cache:'no-store'});
+    const j = await r.json();
+    document.getElementById('dbgHealth').textContent = JSON.stringify(j,null,2);
+    const syms = j?.symbols;
+    if (Array.isArray(syms) && syms.length){
+      currentSymbols = syms;
+      document.getElementById('symbolsBadge').textContent = syms.join(', ');
+    }
+    document.getElementById('streamBadge').textContent = j?.stream || '—';
+  }catch(e){
+    document.getElementById('dbgHealth').textContent = JSON.stringify({error: e?.message||'healthz'}, null, 2);
   }
 }
 
-// --------- Positions ----------
+async function loadSignals(){
+  if (ctrlSignals) ctrlSignals.abort();
+  ctrlSignals = new AbortController();
+  const tb=document.getElementById('signalsTBody');
+  try{
+    const r=await fetch('/signals',{cache:'no-store', signal: ctrlSignals.signal});
+    const j=await r.json();
+    // debug JSON'u yalnızca detay açıkken ve 2sn'de bir yaz
+    if (document.getElementById('signalsDetails').open) {
+      if ((dbgSignalsTick++ % 2) === 0) {
+        document.getElementById('dbgSignals').textContent = JSON.stringify(j,null,2);
+      }
+    }
+    let raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','signals','ticks','items']);
+    if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
+
+    const sigs = raw.map(normalizeSignal);
+    // küçük bir hash ile değişmedi ise render etme
+    const nextHash = JSON.stringify(sigs.map(s=>[s.symbol,s.ts,s.last_price,s.ema_fast,s.ema_slow]));
+    if (nextHash === signalsLastHash) return;
+    signalsLastHash = nextHash;
+
+    // canlı fiyat cache
+    lastPrices = {};
+    for (const s of sigs) {
+      if (s.symbol && Number.isFinite(s.last_price)) lastPrices[s.symbol] = Number(s.last_price);
+      upsertSignalRow(s);
+    }
+
+    // ham json (heavy) — sadece details açıkken formatla
+    if (document.getElementById('signalsDetails').open) {
+      document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);
+    }
+  }catch(e){
+    if (e.name === 'AbortError') return;
+    tb.innerHTML = `<tr class="muted"><td colspan="18">Yüklenemedi.</td></tr>`;
+    document.getElementById('dbgSignals').textContent = 'Hata: '+ (e?.message||e);
+    setLastError(`Signals error: ${e?.message||e}`);
+  }
+}
+
 async function loadPositions(){
+  if (ctrlPositions) ctrlPositions.abort();
+  ctrlPositions = new AbortController();
   const body=document.getElementById('posBody');
 
   async function tryFetch(url){
     try{
-      const r = await fetch(url,{cache:'no-store'});
+      const r = await fetch(url,{cache:'no-store', signal: ctrlPositions.signal});
       if (!r.ok) return null;
       return await r.json();
     }catch{ return null; }
@@ -459,19 +587,14 @@ async function loadPositions(){
   try{
     const candidates = ['/paper/positions','/positions','/open_positions','/account/positions'];
     let j = null;
-    for(const path of candidates){
-      j = await tryFetch(path);
-      if (j) break;
-    }
-
+    for(const path of candidates){ j = await tryFetch(path); if (j) break; }
     if (!j){
       document.getElementById('dbgPositions').textContent = JSON.stringify({detail:"Not Found"}, null, 2);
-      body.innerHTML = `<tr><td class="muted" colspan="10">Endpoint bulunamadı (/paper/positions, /positions, /open_positions, /account/positions).</td></tr>`;
+      body.innerHTML = `<tr class="muted"><td colspan="10">Endpoint bulunamadı (/paper/positions, /positions, /open_positions, /account/positions).</td></tr>`;
       return;
     }
 
-    document.getElementById('dbgPositions').textContent = JSON.stringify(j,null,2);
-
+    // satır-bazlı patch
     let raw = null;
     if (!Array.isArray(j) && j && typeof j === 'object' && j.open && typeof j.open === 'object') {
       raw = mapToArrayBySymbol(j.open);
@@ -481,14 +604,16 @@ async function loadPositions(){
       raw = extractArray(j, ['rows','data','positions','openPositions','items']);
       if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
     }
-
     raw = (raw||[]).filter(r => {
       const hasCore = r && (r.symbol || r.side || r.entry!=null || r.qty!=null);
       return !!hasCore && r.symbol !== 'open' && r.symbol !== 'closed_count';
     });
-
     const rows = raw.map(normalizePosition);
-    for (const r of rows) {
+    if (body && body.firstElementChild && body.firstElementChild.classList.contains('muted')) {
+      body.innerHTML = '';
+    }
+    const seen = new Set();
+    for (const r of rows){
       if ((r.last_price==null || Number.isNaN(r.last_price)) && r.symbol && lastPrices[r.symbol]!=null) {
         r.last_price = lastPrices[r.symbol];
       }
@@ -497,51 +622,48 @@ async function loadPositions(){
       }
       if (r.pnl==null || Number.isNaN(r.pnl)) {
         if (r.entry!=null && r.qty!=null && r.last_price!=null) {
-          r.pnl = (r.side==='short')
-            ? (r.entry - r.last_price) * r.qty
-            : (r.last_price - r.entry) * r.qty;
+          r.pnl = (r.side==='short')? (r.entry - r.last_price) * r.qty : (r.last_price - r.entry) * r.qty;
         }
       }
+      seen.add(r.symbol);
+      upsertPositionRow(r);
     }
-    body.innerHTML='';
-    if(rows.length===0){
-      body.innerHTML = `<tr><td class="muted" colspan="10">Pozisyon yok.</td></tr>`;
-      return;
-    }
-    for(const p of rows){
-      const tr=document.createElement('tr');
-      tr.innerHTML=`
-        <td>${p.symbol||'-'}</td>
-        <td>${p.side||'-'}</td>
-        <td class="num mono">${fmtQ(p.qty)}</td>
-        <td class="num mono">${fmt4(p.entry)}</td>
-        <td class="num mono">${fmt4(p.liq_price)}</td>
-        <td class="num mono">${fmt4(p.last_price)}</td>
-        <td class="num mono ${clsP(p.pnl)}">${fmt2(p.pnl)}</td>
-        <td class="num mono">${fmt2(p.notional_usd)}</td>
-        <td class="num mono">${p.leverage||'-'}</td>
-        <td class="num"><button class="btn" onclick="closeSymbol('${p.symbol}')">Close</button></td>`;
-      body.appendChild(tr);
+    // kapatılan semboller satırlarını temizle
+    for (const sym of positionsRowCache.keys()){
+      if (!seen.has(sym)){
+        const tr = positionsRowCache.get(sym);
+        if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
+        positionsRowCache.delete(sym);
+      }
     }
   }catch(e){
-    body.innerHTML = `<tr><td class="muted" colspan="10">Yüklenemedi.</td></tr>`;
-    setLastError(`Positions error: ${e.message}`);
+    if (e.name === 'AbortError') return;
+    body.innerHTML = `<tr class="muted"><td colspan="10">Yüklenemedi.</td></tr>`;
+    setLastError(`Positions error: ${e?.message||e}`);
   }
 }
 
-// --------- History + KPIs ----------
 async function loadHistory(limit=100){
+  if (ctrlHistory) ctrlHistory.abort();
+  ctrlHistory = new AbortController();
   const body=document.getElementById('histBody');
   try{
-    const r=await fetch(`/history?limit=${limit}`,{cache:'no-store'});
+    const r=await fetch(`/history?limit=${limit}`,{cache:'no-store', signal: ctrlHistory.signal});
     const j=await r.json();
     const raw=(j&&j.ok&&Array.isArray(j.rows))?j.rows:(Array.isArray(j)?j:extractArray(j,['rows','data','items']));
     const rows = raw.map(normalizeHistoryRow);
+
+    // değişmediyse tabloyu elleme
+    const hash = JSON.stringify(rows.map(x=>[x.symbol,x.side,x.entry,x.exit,x.pnl]));
+    if (hash === historyLastHash) return;
+    historyLastHash = hash;
+
     body.innerHTML='';
     if(rows.length===0){
-      body.innerHTML = `<tr><td class="muted" colspan="12">Kayıt yok.</td></tr>`;
+      body.innerHTML = `<tr class="muted"><td colspan="14">Kayıt yok.</td></tr>`;
       return;
     }
+    const frag = document.createDocumentFragment();
     for(const x of rows){
       const fee = estimateFeeUSD(x);
       const net = netPnlUSD(x);
@@ -561,11 +683,15 @@ async function loadHistory(limit=100){
         <td class="num mono">${fmt4(x.liq_price)}</td>
         <td class="num mono">${x.opened_at||'-'}</td>
         <td class="num mono">${x.closed_at||'-'}</td>`;
-      body.appendChild(tr);
+      frag.appendChild(tr);
     }
+    body.appendChild(frag);
+
+    // KPI'leri daha seyrek güncelle (history 10k ayrı fonksiyonda)
   }catch(e){
-    body.innerHTML = `<tr><td class="muted" colspan="12">Yüklenemedi.</td></tr>`;
-    setLastError(`History error: ${e.message}`);
+    if (e.name === 'AbortError') return;
+    body.innerHTML = `<tr class="muted"><td colspan="14">Yüklenemedi.</td></tr>`;
+    setLastError(`History error: ${e?.message||e}`);
   }
 }
 
@@ -603,7 +729,7 @@ function computeKPIs(rows){
   document.getElementById('kpiTotalTrades').textContent = (longCnt + shortCnt);
 }
 
-// ---------- Errors, clock, actions ----------
+/*** ---------- UX HELPERS ---------- ***/
 function setLastError(msg){ document.getElementById('dbgError').textContent = 'Son hata: ' + msg; toast(msg); }
 function tickClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
 setInterval(tickClock, 1000); tickClock();
@@ -612,7 +738,7 @@ function getSymbol(){ return (document.getElementById('symbolInput').value||'ETH
 function getLev(){ return Math.max(1, parseInt(document.getElementById('levInput').value||'10',10)); }
 function getMargin(){ return Math.max(1, parseFloat(document.getElementById('marginInput').value||'10')); }
 
-// --------- Manual Order/Close ----------
+/*** ---------- ACTIONS ---------- ***/
 async function manualOpen(side){
   const symbol=getSymbol();
   const payload={symbol, side, leverage:getLev(), margin_usd:getMargin()};
@@ -622,8 +748,7 @@ async function manualOpen(side){
     if(!r.ok || j.ok===false) throw new Error(j.error||'order_failed');
     toast(`✅ ${symbol} ${side.toUpperCase()} opened (lev=${payload.leverage}, margin=$${payload.margin_usd})`);
     loadPositions(); loadHistory(100);
-    setTimeout(loadSummary, 200);
-    setTimeout(loadSummary, 1200);
+    setTimeout(loadSummary, 300);
   }catch(e){ setLastError(`Order failed: ${e.message}`); }
 }
 async function manualClose(){
@@ -633,20 +758,15 @@ async function manualClose(){
     const j=await r.json();
     if(!r.ok || j.ok===false) throw new Error(j.error||'close_failed');
     const c = j.closed||{};
-    const row = {
-      qty: c.qty, entry: c.entry, exit: c.exit,
-      pnl: c.pnl, fee_total_usd: c.fee_total_usd, net_pnl: c.net_pnl
-    };
+    const row = { qty: c.qty, entry: c.entry, exit: c.exit, pnl: c.pnl, fee_total_usd: c.fee_total_usd, net_pnl: c.net_pnl };
     const fee = estimateFeeUSD(row);
     const net = netPnlUSD(row);
     toast(`ℹ️ ${symbol} closed. PnL=${fmt2(safeNum(c.pnl))}  Fee=${fmt2(fee)}  Net=${fmt2(net)}`);
     loadPositions(); loadHistory(100);
-    setTimeout(loadSummary, 200);
-    setTimeout(loadSummary, 1200);
+    setTimeout(loadSummary, 300);
   }catch(e){ setLastError(`Close failed: ${e.message}`); }
 }
 async function closeSymbol(symbol){ document.getElementById('symbolInput').value=symbol; await manualClose(); }
-
 async function clearHistory(){
   try{
     const r=await fetch('/history/clear',{method:'POST'});
@@ -657,64 +777,29 @@ async function clearHistory(){
 }
 document.getElementById('btnClearHistory').addEventListener('click', clearHistory);
 
-// --------- Init & Polling ----------
+/*** ---------- INIT & POLLING (optimized) ---------- ***/
 async function init(){
   await loadHealth();
   await Promise.all([loadPositions(), loadSignals(), loadHistory(100), loadSummary()]);
 }
-async function loadHealth(){
-  try{
-    let r = await fetch('/healthz',{cache:'no-store'});
-    if (!r.ok) r = await fetch('/health',{cache:'no-store'});
-    if (!r.ok) throw new Error('404');
-    const j=await r.json();
-    document.getElementById('dbgHealth').textContent = JSON.stringify(j,null,2);
-    const syms = j?.symbols;
-    if (Array.isArray(syms) && syms.length){
-      currentSymbols = syms;
-      document.getElementById('symbolsBadge').textContent = syms.join(', ');
-    }
-    document.getElementById('streamBadge').textContent = j?.stream || '—';
-  }catch{
-    document.getElementById('dbgHealth').textContent = JSON.stringify({detail:"Not Found"}, null, 2);
-    document.getElementById('streamBadge').textContent = '—';
-  }
-}
-async function loadSignals(){
-  const tb=document.getElementById('signalsTBody');
-  try{
-    const r=await fetch('/signals',{cache:'no-store'});
-    const j=await r.json();
-    document.getElementById('dbgSignals').textContent = JSON.stringify(j,null,2);
-
-    let raw = Array.isArray(j) ? j : extractArray(j, ['rows','data','signals','ticks','items']);
-    if (!Array.isArray(raw) || raw.length===0) raw = mapToArrayBySymbol(j);
-
-    if ((!currentSymbols || currentSymbols.length===0) && Array.isArray(raw) && raw.length){
-      currentSymbols = [...new Set(raw.map(x => x.symbol).filter(Boolean))];
-      if(currentSymbols.length) document.getElementById('symbolsBadge').textContent = currentSymbols.join(', ');
-    }
-    const sigs = raw.map(normalizeSignal);
-    lastPrices = {};
-    for (const s of sigs) {
-      if (s.symbol && s.last_price != null && !Number.isNaN(s.last_price)) {
-        lastPrices[s.symbol] = Number(s.last_price);
-      }
-    }
-    renderSignalsTable(sigs);
-    try{ document.getElementById('signalsBox').textContent = JSON.stringify(sigs,null,2);}catch{}
-  }catch(e){
-    tb.innerHTML = `<tr><td class="muted" colspan="18">Yüklenemedi.</td></tr>`;
-    document.getElementById('signalsBox').textContent = 'Yüklenemedi.';
-    document.getElementById('dbgSignals').textContent = 'Hata: '+e.message;
-    setLastError(`Signals error: ${e.message}`);
-  }
-}
 init();
-setInterval(loadSignals, 1000);
-setInterval(loadPositions, 3000);
-setInterval(()=>loadHistory(100), 5000);
-setInterval(()=>{ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+
+// Daha düşük frekanslı & çakışmasız polling
+setInterval(loadSignals, 1500);
+setInterval(loadPositions, 4000);
+setInterval(()=>loadHistory(100), 12000);
+setInterval(()=>loadSummary(), 30000);
+
+// JSON box'u sadece açıkken güncelle
+document.getElementById('signalsDetails').addEventListener('toggle', ()=>{
+  if (document.getElementById('signalsDetails').open) {
+    // Açılınca bir kere doldur
+    loadSignals();
+  } else {
+    // Kapalıyken metni temizleyip GC
+    document.getElementById('signalsBox').textContent = '—';
+  }
+});
 </script>
 </body>
 </html>
