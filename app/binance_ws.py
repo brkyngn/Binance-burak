@@ -1,6 +1,7 @@
-# app/binance_ws.py
+from __future__ import annotations
 import asyncio
 import json
+import time
 from typing import Optional
 
 import aiohttp
@@ -11,11 +12,12 @@ from .config import settings
 from .logger import logger
 from .state import MarketState
 from .paper import PaperBroker
-from .db import insert_trade
+from .db import insert_trade, insert_signal
+
 
 def now_ms() -> int:
-    import time
     return int(time.time() * 1000)
+
 
 class BinanceWSClient:
     def __init__(self):
@@ -46,6 +48,10 @@ class BinanceWSClient:
             on_close=lambda rec: asyncio.create_task(insert_trade(rec)),
         )
 
+        # Sinyal loglama örnekleme kontrolü
+        self._log_last_ts: dict[str, int] = {}
+        self._log_interval_ms = int(getattr(settings, "SIGNAL_LOG_INTERVAL_MS", 1000))
+
         self._running = False
 
     # ---------------------------------------------------
@@ -67,89 +73,77 @@ class BinanceWSClient:
             logger.exception("n8n forward error: %s", e)
 
     # ---------------------------------------------------
-    # Sinyal koşulları (yön kararı)
+    # Geliştirilmiş yön kararı
     # ---------------------------------------------------
-    def _funding_ok(self) -> bool:
-        nxt = getattr(settings, "FUNDING_NEXT_TS_MS", None)
-        if not nxt:
-            return True  # funding zamanı bilinmiyorsa filtre geçsin
-        mins_left = (nxt - now_ms()) / 60000.0
-        return mins_left >= settings.FUNDING_MINUTES_BUFFER
-
     def _decide_side(self, sym: str) -> Optional[str]:
-        """
-        Güncel strateji (eldeki verilerle uygulanabilir kısımlar):
-        LONG:
-          Tick/s ≥ 2.0, Spread ≤ 2.0bps, BuyPress ≥ 0.55, Imb ≥ 1.25,
-          ATR∈[0.0008,0.004], VWAP dev ≤0.20%, VolSpike>1.5x, CVD10m>0,
-          Funding>20dk, Yakın S/R yok (sr_dist_pct > SR_NEAR_PCT)
-
-        SHORT:
-          Tick/s ≥ 2.0, Spread ≤ 2.0bps, SellPress ≥0.55 (=> buy_press ≤0.45),
-          Imb ≤0.80, ATR∈[0.0008,0.004], Fiyat VWAP’ın +0.10%~+0.20% bandında üstünde,
-          VolSpike>1.5x, CVD10m<0, RSI≥65, Yakın direnç (sr_dist_pct ≤ SR_NEAR_PCT),
-          + ek: 5s mum yönü "bear"
-        """
         st = self.state.symbols.get(sym)
-        if not st or st.last_price is None:
+        if not st:
             return None
 
         lp    = st.last_price
         ef    = st.ema_fast.value
         es    = st.ema_slow.value
-        rsi   = st.rsi_value
-        vwap  = st.vwap(settings.VWAP_WINDOW_SEC * 1000)
-        vdev  = st.vwap_dev_pct(settings.VWAP_WINDOW_SEC * 1000)
-        atr   = st.atr_like(settings.ATR_WINDOW_SEC * 1000)
+        vwap  = st.vwap(getattr(settings, "VWAP_WINDOW_SEC", 60) * 1000)
+        atr   = st.atr_like(getattr(settings, "ATR_WINDOW_SEC", 60) * 1000)
         spr   = st.spread_bps()
         tick  = st.tick_rate(2000)
         bp    = st.buy_pressure(2000)
-        imb   = st.imbalance()
-        vsp   = st.volume_spike_ratio(5000, 60000)
-        cvd10 = st.cvd(600_000)
-        sr_d  = st.sr_near_pct(1_800_000, 3)
-        c5    = st.candle_dir(5_000)
 
-        # Temel veri kontrolleri
-        key_vals = (lp, ef, es, vwap, vdev, atr, spr, tick, bp, imb, vsp, cvd10, sr_d, c5)
-        if any(v is None for v in key_vals):
+        rsi   = getattr(st, "rsi_value", None)
+        vdev  = getattr(st, "vwap_dev_pct", None)
+        if vdev is None and (vwap and lp):
+            vdev = abs(lp - vwap) / vwap
+
+        imb   = st.imbalance() if callable(getattr(st, "imbalance", None)) else getattr(st, "imbalance", None)
+        volsp = getattr(st, "vol_spike_5s", None)
+        cvd10 = getattr(st, "cvd_10m", None)
+        srpct = getattr(st, "sr_dist_pct", None)
+        candle= getattr(st, "candle5_dir", None)
+
+        basics = [lp, ef, es, atr, spr, tick]
+        if any(x is None for x in basics):
             return None
 
-        # Ortak filtreler
-        if tick < settings.MIN_TICKS_PER_SEC: return None
-        if spr > settings.MAX_SPREAD_BPS:     return None
-        if atr < settings.ATR_MIN or atr > settings.ATR_MAX: return None
-        if not self._funding_ok():            return None
+        if spr > getattr(settings, "MAX_SPREAD_BPS", 0.05):
+            return None
+        if not (getattr(settings, "ATR_MIN", 0.00012) <= atr <= getattr(settings, "ATR_MAX", 0.004)):
+            return None
+        if tick < getattr(settings, "MIN_TICKS_PER_SEC", 2.0):
+            return None
+        if vdev is None or vdev > getattr(settings, "VWAP_DEV_MAX", 0.002):
+            return None
+        if srpct is not None and srpct <= getattr(settings, "SR_NEAR_PCT", 0.00010):
+            return None
 
-        # LONG
         long_ok = (
-            ef > es and
-            bp >= settings.BUY_PRESSURE_MIN and
-            imb >= settings.IMB_LONG_MIN and
-            vdev <= settings.VWAP_DEV_MAX_LONG and
-            vsp > settings.VOLUME_SPIKE_MIN and
-            cvd10 > 0 and
-            (sr_d is None or sr_d > settings.SR_NEAR_PCT) and
-            (rsi is None or rsi < 70)
+            ef is not None and es is not None and ef > es and
+            bp is not None and bp >= getattr(settings, "BUY_PRESSURE_MIN", 0.50) and
+            (rsi is None or rsi <= getattr(settings, "RSI_LONG_MAX", 65)) and
+            (imb is None or imb >= getattr(settings, "IMB_LONG_MIN", 1.0))
         )
+        if volsp is not None:
+            long_ok = long_ok and (volsp >= getattr(settings, "VOL_SPIKE_MIN", 0.20) or (imb is not None and imb >= 2.0 and tick >= 5.0))
+        if cvd10 is not None and cvd10 <= getattr(settings, "CVD_ABS_MIN", 50):
+            long_ok = long_ok and (cvd10 > 0)
 
-        # SHORT
-        dev_band_ok = (
-            lp > vwap and
-            settings.SHORT_VWAP_DEV_MIN <= (lp - vwap) / vwap <= settings.SHORT_VWAP_DEV_MAX
-        )
-        sell_press = bp <= (1.0 - settings.BUY_PRESSURE_MIN)  # ≥0.55 sell pressure
+        sellp = (1.0 - bp) if bp is not None else None
         short_ok = (
-            ef < es and
-            sell_press and
-            imb <= settings.IMB_SHORT_MAX and
-            dev_band_ok and
-            vsp > settings.VOLUME_SPIKE_MIN and
-            cvd10 < 0 and
-            (rsi is not None and rsi >= settings.RSI_SHORT_MIN) and
-            (sr_d is not None and sr_d <= settings.SR_NEAR_PCT) and
-            (c5 == "bear")
+            ef is not None and es is not None and ef < es and
+            sellp is not None and sellp >= getattr(settings, "BUY_PRESSURE_MIN", 0.50) and
+            (rsi is not None and rsi >= getattr(settings, "RSI_SHORT_MIN", 75)) and
+            (imb is None or imb <= getattr(settings, "IMB_SHORT_MAX", 1.0))
         )
+        if vdev is not None:
+            short_ok = short_ok and (
+                getattr(settings, "VWAP_SHORT_MIN", 0.00010) <= vdev <= getattr(settings, "VWAP_SHORT_MAX", 0.00200)
+            )
+        if cvd10 is not None and cvd10 >= -getattr(settings, "CVD_ABS_MIN", 50):
+            short_ok = short_ok and (cvd10 < 0)
+
+        if candle == "bull" and short_ok and (vdev is not None and vdev < 0.0002):
+            short_ok = False
+        if candle == "bear" and long_ok and (vdev is not None and vdev < 0.0002):
+            long_ok = False
 
         if long_ok:
             return "long"
@@ -158,16 +152,17 @@ class BinanceWSClient:
         return None
 
     # ---------------------------------------------------
-    # Pozisyon aç/kapat yardımcıları
+    # Otomatik aç/kapat yardımcıları (Paper)
     # ---------------------------------------------------
     def _calc_auto_params(self, sym: str, side: str, entry_price: float) -> dict:
         lev = int(getattr(settings, "AUTO_LEVERAGE", 10))
         margin = float(getattr(settings, "AUTO_MARGIN_USD", 1000.0))
         notional = float(getattr(settings, "AUTO_NOTIONAL_USD", margin * lev))
+
         qty = max(1e-8, round(notional / entry_price, 6))
 
-        tp_d = float(getattr(settings, "AUTO_ABS_TP_USD", 50.0))
-        sl_d = float(getattr(settings, "AUTO_ABS_SL_USD", 50.0))
+        tp_d = float(getattr(settings, "AUTO_ABS_TP_USD", 25.0))
+        sl_d = float(getattr(settings, "AUTO_ABS_SL_USD", 15.0))
         delta_tp = tp_d / qty
         delta_sl = sl_d / qty
 
@@ -178,8 +173,16 @@ class BinanceWSClient:
             tp = entry_price - delta_tp
             sl = entry_price + delta_sl
 
-        return {"lev": lev, "margin": margin, "notional": notional,
-                "qty": qty, "tp": tp, "sl": sl, "tp_d": tp_d, "sl_d": sl_d}
+        return {
+            "lev": lev,
+            "margin": margin,
+            "notional": notional,
+            "qty": qty,
+            "tp": tp,
+            "sl": sl,
+            "tp_d": tp_d,
+            "sl_d": sl_d,
+        }
 
     def _open_auto(self, sym: str, side: str, price: float, ts: int):
         last = self.signal_cooldown.get(sym, 0)
@@ -199,7 +202,7 @@ class BinanceWSClient:
             )
             self.signal_cooldown[sym] = ts
             logger.info(
-                "AUTO-OPEN %s %s qty=%s entry=%.4f lev=%dx margin=$%.2f notional=$%.2f tp=%.4f sl=%.4f (±$%.2f)",
+                "AUTO-OPEN %s %s qty=%s entry=%.2f lev=%dx margin=$%.2f notional=$%.2f tp=%.2f sl=%.2f (±$%.2f)",
                 sym, side, prm["qty"], price, prm["lev"], prm["margin"], prm["notional"], prm["tp"], prm["sl"], prm["tp_d"]
             )
         except Exception as e:
@@ -222,6 +225,7 @@ class BinanceWSClient:
             fb = {"want": opposite, "count": 0}
         fb["count"] = int(fb["count"]) + 1
         self.flip_buffer[sym] = fb
+
         logger.info("FLIP-CANDIDATE %s need=%s count=%s", sym, opposite, fb["count"])
 
         if fb["count"] >= 2:
@@ -234,6 +238,52 @@ class BinanceWSClient:
                 return
             self._open_auto(sym, opposite, price, ts)
             self.flip_buffer.pop(sym, None)
+
+    # ---------------------------------------------------
+    # Sinyal logla (örneklemeli)
+    # ---------------------------------------------------
+    async def _maybe_log_signal(self, sym: str):
+        """Her sembol için en fazla _log_interval_ms frekansında 1 kayıt."""
+        ts = now_ms()
+        last = self._log_last_ts.get(sym, 0)
+        if ts - last < self._log_interval_ms:
+            return
+        self._log_last_ts[sym] = ts
+
+        snap = self.state.snapshot().get(sym, {})
+        if not snap:
+            return
+
+        # _decide_side ile aynı yön kararı
+        side = self._decide_side(sym)
+
+        row = {
+            "ts_ms": ts,
+            "symbol": sym,
+            "last_price": snap.get("last_price"),
+            "ema_fast": snap.get("ema_fast"),
+            "ema_slow": snap.get("ema_slow"),
+            "rsi14": snap.get("rsi14"),
+            "vwap60": snap.get("vwap60"),
+            "vwap_dev_pct": snap.get("vwap_dev_pct"),
+            "atr60": snap.get("atr60"),
+            "tick_rate_2s": snap.get("tick_rate_2s"),
+            "spread_bps": snap.get("spread_bps"),
+            "buy_pressure_2s": snap.get("buy_pressure_2s"),
+            "sell_pressure_2s": (1.0 - snap["buy_pressure_2s"]) if snap.get("buy_pressure_2s") is not None else None,
+            "imbalance": snap.get("imbalance"),
+            "vol_spike_5s": snap.get("vol_spike_5s"),
+            "cvd_10m": snap.get("cvd_10m"),
+            "sr_dist_pct": snap.get("sr_dist_pct"),
+            "candle5_dir": snap.get("candle5_dir"),
+            "short_vwap_band_ok": snap.get("short_vwap_band_ok"),
+            "side": side,
+        }
+
+        try:
+            await insert_signal(row)
+        except Exception as e:
+            logger.warning("insert_signal failed %s: %s", sym, e)
 
     # ---------------------------------------------------
     # Handlers
@@ -253,16 +303,19 @@ class BinanceWSClient:
 
         ema_f, ema_s = self.state.on_agg_trade(sym, price, qty, ts, buyer_is_maker)
 
-        # mark-to-market (TP/SL/liq ve canlı pnl)
+        # PnL/SL/TP
         self.paper.mark_to_market(sym, price)
 
-        # debug
-        if ema_f is not None and ema_s is not None:
-            logger.info("TICK %s p=%.8f ema_fast=%.4f ema_slow=%.4f", sym, price, ema_f, ema_s)
-
+        # Sinyali hesapla
         decision = self._decide_side(sym)
+
+        # Flip veya açılış
         self._maybe_flip(sym, decision, price, ts)
 
+        # Örneklemeli sinyal logla (DB)
+        await self._maybe_log_signal(sym)
+
+        # Opsiyonel forward
         await self._forward_n8n(d)
 
     async def _handle_depth(self, data: dict):
@@ -282,7 +335,7 @@ class BinanceWSClient:
         self.state.on_top(sym, best_bid, best_ask, bid_vol, ask_vol, ts)
 
     # ---------------------------------------------------
-    # WS döngüsü
+    # WS Döngüleri
     # ---------------------------------------------------
     async def _ws_loop(self, per_symbol_stream: str, handler):
         params = self._build_streams(per_symbol_stream)
@@ -308,7 +361,8 @@ class BinanceWSClient:
         self._running = True
         while self._running:
             try:
-                tasks = [asyncio.create_task(self._ws_loop(self.trade_stream, self._handle_agg_trade))]
+                tasks = []
+                tasks.append(asyncio.create_task(self._ws_loop(self.trade_stream, self._handle_agg_trade)))
                 if self.enable_depth:
                     tasks.append(asyncio.create_task(self._ws_loop(self.depth_stream, self._handle_depth)))
                 await asyncio.gather(*tasks)
@@ -324,36 +378,14 @@ class BinanceWSClient:
         self._running = False
 
     # ---------------------------------------------------
-    # /signals görünümü
+    # /signals görünümü için
     # ---------------------------------------------------
     def get_signals(self) -> dict:
         out = {}
         snap = self.state.snapshot()
         for sym, st in snap.items():
-            lp = st.get("last_price")
-            vwap = st.get("vwap60")
-            short_band = None
-            if lp is not None and vwap is not None and vwap > 0:
-                dev = (lp - vwap) / vwap
-                short_band = (settings.SHORT_VWAP_DEV_MIN <= dev <= settings.SHORT_VWAP_DEV_MAX)
-
             out[sym] = {
                 "side": self._decide_side(sym),
-                "last_price": st.get("last_price"),
-                "ema_fast": st.get("ema_fast"),
-                "ema_slow": st.get("ema_slow"),
-                "rsi14": st.get("rsi14"),
-                "vwap60": st.get("vwap60"),
-                "vwap_dev_pct": st.get("vwap_dev_pct"),
-                "atr60": st.get("atr60"),
-                "tick_rate_2s": st.get("tick_rate_2s"),
-                "spread_bps": st.get("spread_bps"),
-                "buy_pressure_2s": st.get("buy_pressure_2s"),
-                "imbalance": st.get("imbalance"),
-                "vol_spike_5s": st.get("vol_spike_5s"),
-                "cvd_10m": st.get("cvd_10m"),
-                "sr_dist_pct": st.get("sr_dist_pct"),
-                "candle5_dir": st.get("candle5_dir"),
-                "short_vwap_band_ok": short_band,
+                **st,  # snapshot içindeki tüm metrikler (vwap_dev_pct, vol_spike_5s vs. varsa)
             }
         return out
