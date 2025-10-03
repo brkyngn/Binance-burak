@@ -1,14 +1,16 @@
 # app/db.py
+from __future__ import annotations
 import json
-from typing import Any, List
+from typing import Any, List, Optional
 from datetime import datetime, timezone
+from time import time
 
 import asyncpg
 from .config import settings
 
-_pool: asyncpg.pool.Pool | None = None
+_pool: Optional[asyncpg.pool.Pool] = None
 
-# ---- Ana tablo şeması (CREATE IF NOT EXISTS) ----
+# ---- Ana tablo (trades) ----
 DDL = """
 CREATE TABLE IF NOT EXISTS trades (
     id BIGSERIAL PRIMARY KEY,
@@ -24,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 """
 
-# ---- Sonradan eklenen kolonları idempotent şekilde ekle ----
+# ---- trades için sonradan eklenen kolonlar ----
 MIGRATIONS = [
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS leverage INT;",
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS margin_usd DOUBLE PRECISION;",
@@ -35,27 +37,59 @@ MIGRATIONS = [
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS raw JSONB;",
 ]
 
+# ---- Sinyal log tablosu ----
+SIGNAL_DDL = """
+CREATE TABLE IF NOT EXISTS signal_logs (
+    id BIGSERIAL PRIMARY KEY,
+    ts_ms BIGINT NOT NULL,
+    symbol TEXT NOT NULL,
+    last_price DOUBLE PRECISION,
+    ema_fast DOUBLE PRECISION,
+    ema_slow DOUBLE PRECISION,
+    rsi14 DOUBLE PRECISION,
+    vwap60 DOUBLE PRECISION,
+    vwap_dev_pct DOUBLE PRECISION,
+    atr60 DOUBLE PRECISION,
+    tick_rate_2s DOUBLE PRECISION,
+    spread_bps DOUBLE PRECISION,
+    buy_pressure_2s DOUBLE PRECISION,
+    sell_pressure_2s DOUBLE PRECISION,
+    imbalance DOUBLE PRECISION,
+    vol_spike_5s DOUBLE PRECISION,
+    cvd_10m DOUBLE PRECISION,
+    sr_dist_pct DOUBLE PRECISION,
+    candle5_dir TEXT,
+    short_vwap_band_ok BOOLEAN,
+    side TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_signal_logs_ts ON signal_logs(ts_ms);
+CREATE INDEX IF NOT EXISTS idx_signal_logs_sym_ts ON signal_logs(symbol, ts_ms);
+"""
 
+
+# ---------------------------------
+# Init & migrations
+# ---------------------------------
 async def init_pool():
-    """DB pool + DDL + idempotent migration."""
+    """DB pool oluşturur, tablo ve kolonları hazırlar."""
     global _pool
     if not settings.DATABASE_URL:
         return
     _pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=5)
     async with _pool.acquire() as conn:
-        # Tablo yoksa oluştur
+        # trades tablosu
         await conn.execute(DDL)
-        # Eksik kolonları ekle
         for sql in MIGRATIONS:
             try:
                 await conn.execute(sql)
             except Exception:
-                # eşzamanlı deploy vs. durumlarda safe-ignore
-                pass
+                pass  # eşzamanlı deploy vb.
+
+        # signal_logs tablosu
+        await conn.execute(SIGNAL_DDL)
 
 
 async def ping() -> bool:
-    """Basit bağlantı testi."""
     if not settings.DATABASE_URL:
         return False
     global _pool
@@ -69,12 +103,10 @@ async def ping() -> bool:
         return False
 
 
+# ---------------------------------
+# Trades işlemleri
+# ---------------------------------
 async def insert_trade(rec: dict):
-    """
-    rec: PaperBroker.close sonrası gelen snapshot
-    Beklenen alanlar: symbol, side, qty, entry, exit, pnl, leverage, margin_usd,
-                      notional_usd, liq_price, open_ts, close_ts
-    """
     if not settings.DATABASE_URL:
         return
     global _pool
@@ -108,10 +140,6 @@ async def insert_trade(rec: dict):
 
 
 def _fmt_ts_ms(ms: int | None) -> str | None:
-    """
-    ms (epoch millis) -> 'dd-mm-YYYY HH:MM:SS' (UTC)
-    Dashboard için daha okunur format.
-    """
     if not ms:
         return None
     try:
@@ -122,7 +150,6 @@ def _fmt_ts_ms(ms: int | None) -> str | None:
 
 
 async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
-    """Son işlemler (JSON-serializable)."""
     if not settings.DATABASE_URL:
         return []
     global _pool
@@ -161,3 +188,90 @@ async def fetch_recent(limit: int = 50) -> List[dict[str, Any]]:
             "created_at": created_at_str,
         })
     return out
+
+
+# ---------------------------------
+# Signal Logs işlemleri
+# ---------------------------------
+async def insert_signal(row: dict):
+    """Tek satır sinyal kaydı ekler."""
+    if not settings.DATABASE_URL:
+        return
+    global _pool
+    if _pool is None:
+        await init_pool()
+
+    q = """
+        INSERT INTO signal_logs(
+            ts_ms, symbol, last_price, ema_fast, ema_slow, rsi14,
+            vwap60, vwap_dev_pct,
+            atr60, tick_rate_2s, spread_bps,
+            buy_pressure_2s, sell_pressure_2s, imbalance,
+            vol_spike_5s, cvd_10m,
+            sr_dist_pct, candle5_dir, short_vwap_band_ok,
+            side
+        ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+            $12,$13,$14,$15,$16,$17,$18,$19,$20
+        );
+    """
+    vals = (
+        row.get("ts_ms"), row.get("symbol"),
+        row.get("last_price"), row.get("ema_fast"), row.get("ema_slow"), row.get("rsi14"),
+        row.get("vwap60"), row.get("vwap_dev_pct"),
+        row.get("atr60"), row.get("tick_rate_2s"), row.get("spread_bps"),
+        row.get("buy_pressure_2s"), row.get("sell_pressure_2s"), row.get("imbalance"),
+        row.get("vol_spike_5s"), row.get("cvd_10m"),
+        row.get("sr_dist_pct"), row.get("candle5_dir"), row.get("short_vwap_band_ok"),
+        row.get("side"),
+    )
+    async with _pool.acquire() as conn:
+        await conn.execute(q, *vals)
+
+
+async def fetch_signals(symbol: Optional[str] = None, hours: int = 48, limit: int = 5000) -> List[dict[str, Any]]:
+    """Belirtilen saat kadar geriye dönük sinyalleri döner."""
+    if not settings.DATABASE_URL:
+        return []
+    global _pool
+    if _pool is None:
+        await init_pool()
+
+    cutoff = int(time() * 1000) - hours * 3600 * 1000
+    if symbol:
+        q = """
+            SELECT * FROM signal_logs
+            WHERE symbol = $1 AND ts_ms >= $2
+            ORDER BY ts_ms DESC
+            LIMIT $3;
+        """
+        args = (symbol.upper(), cutoff, limit)
+    else:
+        q = """
+            SELECT * FROM signal_logs
+            WHERE ts_ms >= $1
+            ORDER BY ts_ms DESC
+            LIMIT $2;
+        """
+        args = (cutoff, limit)
+
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(q, *args)
+    return [dict(r) for r in rows]
+
+
+async def purge_signals_older_than(days: int = 2) -> int:
+    """X günden eski sinyalleri siler."""
+    if not settings.DATABASE_URL:
+        return 0
+    global _pool
+    if _pool is None:
+        await init_pool()
+
+    cutoff = int(time() * 1000) - days * 24 * 3600 * 1000
+    async with _pool.acquire() as conn:
+        res = await conn.execute("DELETE FROM signal_logs WHERE ts_ms < $1;", cutoff)
+    try:
+        return int(res.split()[-1])
+    except Exception:
+        return 0
